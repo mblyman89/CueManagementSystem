@@ -30,6 +30,7 @@ class EmptyableDoubleSpinBox(QDoubleSpinBox):
         else:
             super().keyPressEvent(event)
 
+
 class CueEditorDialog(QDialog):
     cue_edited = Signal(dict)
 
@@ -50,7 +51,7 @@ class CueEditorDialog(QDialog):
                 background-color: #2d2d2d;
             }
         """)
-    
+
         # If edit_cue is provided, populate the fields with its data
         if self.edit_cue:
             self._populate_fields_from_cue()
@@ -235,7 +236,7 @@ class CueEditorDialog(QDialog):
         self.execute_time.setRange(0, 1000)
         self.execute_time.setSingleStep(0.1)
         self.execute_time.setMaximum(99999.99)
-        self.execute_time.setDecimals(3)
+        self.execute_time.setDecimals(4)
         self.execute_time.setStyleSheet(doublespinbox_style)
         self.execute_time.setAlignment(Qt.AlignCenter)
         self.execute_time.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
@@ -514,10 +515,10 @@ class CueEditorDialog(QDialog):
         """Update the output spinboxes based on cue type and number of outputs"""
         # First, ensure we clear all existing spinboxes
         self._clear_output_spinboxes()
-        
+
         # Give the UI a moment to process deletions
         QTimer.singleShot(0, lambda: self._create_new_spinboxes(cue_type))
-    
+
     def _create_new_spinboxes(self, cue_type):
         """Create new spinboxes after clearing old ones"""
         is_run = "RUN" in cue_type
@@ -533,7 +534,7 @@ class CueEditorDialog(QDialog):
 
         # Create spinboxes
         self._create_output_spinboxes(num_outputs, cue_type)
-        
+
         # Set output values if edit_cue contains parsed values
         if hasattr(self, 'edit_cue') and self.edit_cue and '_parsed_output_values' in self.edit_cue:
             output_values = self.edit_cue['_parsed_output_values']
@@ -565,7 +566,7 @@ class CueEditorDialog(QDialog):
                             grandchild = child.layout().takeAt(0)
                             if grandchild.widget():
                                 grandchild.widget().deleteLater()
-    
+
         # Also, remove all direct children of the outputs_container
         for child in self.outputs_container.findChildren(QWidget):
             if child != self.outputs_container and child.parent() == self.outputs_container:
@@ -944,7 +945,7 @@ class CueEditorDialog(QDialog):
             else:
                 outputs_str = "1"  # Default
 
-        # Format execute_time as 0:00.00 (minutes:seconds.milliseconds)
+        # Format execute_time as 00:00.0000 (minutes:seconds.milliseconds)
         execute_time = cue_data["execute_time"]
         formatted_time = execute_time
 
@@ -959,8 +960,8 @@ class CueEditorDialog(QDialog):
                 minutes = int(total_seconds // 60)
                 seconds = total_seconds % 60
 
-                # Format as 0:00.00
-                formatted_time = f"{minutes}:{seconds:05.2f}"
+                # Format as 00:00.0000
+                formatted_time = f"{minutes:02d}:{seconds:07.4f}"
 
             elif isinstance(execute_time, str) and ':' in execute_time:
                 # Handle existing time format (could be various formats)
@@ -972,22 +973,22 @@ class CueEditorDialog(QDialog):
                     total_minutes = int(hours) * 60 + int(minutes)
                     formatted_time = f"{total_minutes}:{seconds}"
 
-                    # Ensure seconds has 2 decimal places
+                    # Ensure seconds has 4 decimal places
                     if '.' not in formatted_time:
                         seconds_val = float(seconds)
-                        formatted_time = f"{total_minutes}:{seconds_val:06.3f}"
+                        formatted_time = f"{total_minutes:02d}:{seconds_val:07.4f}"
 
                 elif len(parts) == 2:  # MM:SS format
                     minutes, seconds = parts
 
-                    # Ensure seconds has 2 decimal places
+                    # Ensure seconds has 4 decimal places
                     if '.' not in seconds:
                         seconds_val = float(seconds)
-                        formatted_time = f"{minutes}:{seconds_val:05.2f}"
+                        formatted_time = f"{minutes:02d}:{seconds_val:07.4f}"
                     else:
-                        # Make sure seconds is properly formatted with 2 decimal places
+                        # Make sure seconds is properly formatted with 4 decimal places
                         seconds_val = float(seconds)
-                        formatted_time = f"{minutes}:{seconds_val:05.2f}"
+                        formatted_time = f"{minutes:02d}:{seconds_val:07.4f}"
         except Exception as e:
             print(f"Error formatting time: {e}")
             # Keep original if conversion fails
@@ -1106,10 +1107,10 @@ class CueEditorDialog(QDialog):
         if 'execute_time' in self.edit_cue and self.edit_cue['execute_time'] is not None:
             try:
                 exec_time = self.edit_cue['execute_time']
-                
+
                 # Handle time in different formats
                 if isinstance(exec_time, str):
-                    # Check if it's in MM:SS.ss format
+                    # Check if it's in MM:SS.ssss format (or legacy M:SS.ss format)
                     if ":" in exec_time:
                         parts = exec_time.split(":")
                         if len(parts) == 2:
@@ -1121,32 +1122,32 @@ class CueEditorDialog(QDialog):
                         exec_time = float(exec_time)
                     else:
                         exec_time = 0
-                        
+
                 # Now set the value as a float
                 self.execute_time.setValue(float(exec_time))
-                
+
             except (ValueError, TypeError, AttributeError) as e:
                 print(f"Could not set execute time: {self.edit_cue['execute_time']} - {str(e)}")
                 # Default to 0 if there's an error
                 self.execute_time.setValue(0)
-    
+
         # Handle outputs - note: we don't call _update_output_spinboxes here as it will be called at the end of __init__
         if 'output_values' in self.edit_cue and self.edit_cue['output_values']:
             output_values = self.edit_cue['output_values']
-    
+
             # Set number of outputs for RUN types
             if "RUN" in current_cue_type:
                 self.num_outputs.setValue(len(output_values))
-                
+
             # Store output values to be set after spinboxes are created
             self.edit_cue['_parsed_output_values'] = output_values
-            
+
         elif 'outputs' in self.edit_cue and self.edit_cue['outputs']:
             # Try to parse outputs string
             try:
                 output_str = str(self.edit_cue['outputs'])
                 output_values = []
-    
+
                 # Handle different output formats (comma or semicolon separated)
                 if ";" in output_str:
                     # Handle paired outputs
@@ -1159,15 +1160,15 @@ class CueEditorDialog(QDialog):
                     for value in output_str.split(","):
                         if value.strip() and value.strip().replace(".", "", 1).isdigit():
                             output_values.append(float(value.strip()))
-    
+
                 if output_values:
                     # Set number of outputs for RUN types
                     if "RUN" in current_cue_type:
                         self.num_outputs.setValue(len(output_values))
-                    
+
                     # Store output values to be set after spinboxes are created
                     self.edit_cue['_parsed_output_values'] = output_values
-                    
+
             except Exception as e:
                 print(f"Error parsing output values: {str(e)}")
 

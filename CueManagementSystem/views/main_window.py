@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QTimer, QMetaObject, Q_ARG, Slot
 from utils.color_utils import lighten_color, darken_color
 from views.table.cue_table import CueTableView
 from utils.data_utils import get_test_data
-from views.led_panel.led_grid import LedGrid
+from views.led_panel.led_panel_manager import LedPanelManager
 from views.dialogs.cue_creator import CueCreatorDialog
 from views.dialogs.cue_editor import CueEditorDialog
 from views.dialogs.music_file_dialog import MusicFileDialog
@@ -17,8 +17,12 @@ from views.dialogs.generate_show_dialog import GeneratorPromptDialog
 from views.button_bar.button_bar import ButtonBar
 from views.dialogs.mode_selector_dialog import ModeSelector
 from controllers.system_mode import SystemMode
+from views.button_bar.button_mqtt_integration import ButtonMQTTIntegration
+from controllers.gpio_controller import GPIOController
+from controllers.show_execution_manager import ShowExecutionManager
 from controllers.music_manager import MusicManager
 from controllers.show_manager import ShowManager
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -35,6 +39,12 @@ class MainWindow(QMainWindow):
         self.system_mode = SystemMode()
         self.music_manager = MusicManager()
 
+        # Get references to MQTT integration components from system_mode
+        self.gpio_controller = self.system_mode.gpio_controller
+        self.show_execution_manager = self.system_mode.show_execution_manager
+
+        # Note: ButtonMQTTIntegration will be initialized after button_bar is created
+
         # Initialize UI components
         self.init_ui()
 
@@ -48,6 +58,9 @@ class MainWindow(QMainWindow):
         # Connect preview controller signals
         self.preview_controller.preview_started.connect(self.handle_preview_started)
         self.preview_controller.preview_ended.connect(self.handle_preview_ended)
+
+        # Connect MQTT integration signals
+        self.connect_mqtt_signals()
 
         # Initialize button text based on current mode
         self.update_mode_buttons_text()
@@ -81,13 +94,14 @@ class MainWindow(QMainWindow):
 
         # Create the cue_table FIRST
         self.cue_table = CueTableView()
-        self.cue_table.setStyleSheet("background-color: #ffffff;")
+        # Remove white background that conflicts with corner button styling
+        self.cue_table.setStyleSheet("")
 
         # Connect double-click on table to edit function
         self.cue_table.doubleClicked.connect(lambda: self.edit_selected_cue())
 
-        # LED Panel (Left)
-        self.led_panel = LedGrid()
+        # LED Panel (Left) - Now using LED Panel Manager with dual views
+        self.led_panel = LedPanelManager()
         self.led_panel.setStyleSheet("background-color: #2c3e50;")
         lower_layout.addWidget(self.led_panel, 1)  # 1:1 ratio
 
@@ -110,6 +124,24 @@ class MainWindow(QMainWindow):
         # Store a reference to the buttons dictionary for easy access
         self.buttons = button_bar.buttons
 
+        # Initialize ButtonMQTTIntegration only if all components are available
+        try:
+            # Only create MQTT integration if we have all required components
+            if hasattr(self, 'system_mode') and hasattr(self, 'gpio_controller'):
+                from views.button_bar.button_mqtt_integration import ButtonMQTTIntegration
+                self.button_mqtt_integration = ButtonMQTTIntegration(
+                    button_bar=button_bar,
+                    system_mode=self.system_mode,
+                    main_window=self
+                )
+                print("✓ MQTT integration initialized")
+            else:
+                self.button_mqtt_integration = None
+                print("ℹ MQTT integration not available - using simulation mode only")
+        except Exception as e:
+            print(f"Warning: Could not initialize MQTT integration: {e}")
+            self.button_mqtt_integration = None
+
         # Connect button signals to actions
         self.connect_button_signals(button_bar)
 
@@ -117,13 +149,26 @@ class MainWindow(QMainWindow):
 
     def connect_button_signals(self, button_bar):
         """Connect ButtonBar signals to MainWindow actions"""
-        # Connect execute/preview buttons
-        button_bar.execute_all_clicked.connect(self.preview_show)
+        # Connect execute/preview buttons - use mode-aware routing
+        button_bar.execute_all_clicked.connect(self.handle_execute_all_button)
 
-        # Connect playback control buttons
-        button_bar.stop_clicked.connect(self.stop_preview)
-        button_bar.pause_clicked.connect(self.pause_preview)
-        button_bar.resume_clicked.connect(self.resume_preview)
+        # Connect playback control buttons - use mode-aware routing
+        button_bar.stop_clicked.connect(self.handle_stop_button)
+        button_bar.pause_clicked.connect(self.handle_pause_button)
+        button_bar.resume_clicked.connect(self.handle_resume_button)
+
+        # Connect MQTT control buttons (only if MQTT integration exists)
+        # Note: enable_outputs and arm_outputs are handled by button_mqtt_integration.py
+        # to avoid duplicate signal connections
+        try:
+            if hasattr(button_bar, 'execute_cue_clicked'):
+                button_bar.execute_cue_clicked.connect(self.handle_execute_cue_button)
+
+            # Note: execute_all_clicked is handled by handle_execute_all_button above
+            # which works in both simulation and hardware modes
+
+        except Exception as e:
+            print(f"Warning: Could not connect MQTT buttons: {e}")
 
         # Connect editing buttons
         button_bar.create_cue_clicked.connect(self.show_cue_creator)
@@ -132,9 +177,10 @@ class MainWindow(QMainWindow):
         button_bar.delete_all_clicked.connect(self.delete_all_cues)
 
         # Connect additional features
-        button_bar.music_clicked.connect(self.show_music_manager)
+        button_bar.import_music_clicked.connect(self.show_music_manager)
         button_bar.generate_show_clicked.connect(self.show_generator_prompt)
         button_bar.mode_clicked.connect(self.show_mode_selector)
+        button_bar.led_panel_clicked.connect(self.show_led_panel_selector)  # New LED panel button
 
         # Connect exit (additional handling could be added here)
         button_bar.exit_clicked.connect(self.close)
@@ -144,6 +190,350 @@ class MainWindow(QMainWindow):
         button_bar.load_show_clicked.connect(self.show_manager.load_show)
         button_bar.import_show_clicked.connect(self.show_manager.import_show)
         button_bar.export_show_clicked.connect(self.show_manager.export_show)
+
+    # Mode-aware button routing methods
+    def handle_execute_all_button(self):
+        """Execute show button - works in both simulation and hardware modes"""
+        try:
+            # ALWAYS show the preview on LED panel (simulation functionality)
+            self.preview_show()
+
+            # ALSO send MQTT commands if in hardware mode
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode != 'simulation':
+                # In hardware mode: Also execute via MQTT
+                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
+                    # Execute show via MQTT (sequential cue execution)
+                    self.execute_show_via_mqtt()
+                elif hasattr(self.system_mode, 'handle_execute_show_button'):
+                    # Direct system mode execution
+                    self.execute_show_via_system_mode()
+                else:
+                    print("Hardware execution not available - preview only")
+            else:
+                print("Simulation mode: Preview only")
+
+        except Exception as e:
+            print(f"Execute all button error: {e}")
+            # Always ensure preview works as fallback
+            try:
+                self.preview_show()
+            except:
+                pass
+
+    def handle_stop_button(self):
+        """Route stop button based on current mode"""
+        try:
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                # In simulation mode: Stop preview
+                self.stop_preview()
+            else:
+                # In hardware mode: Abort execution
+                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
+                    self.button_mqtt_integration.handle_abort()
+                else:
+                    # Fallback to stop preview
+                    self.stop_preview()
+        except Exception as e:
+            print(f"Stop button error: {e}")
+            # Fallback to simulation mode behavior
+            self.stop_preview()
+
+    def handle_pause_button(self):
+        """Route pause button based on current mode"""
+        try:
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                # In simulation mode: Pause preview
+                self.pause_preview()
+            else:
+                # In hardware mode: Pause execution
+                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
+                    self.button_mqtt_integration.handle_pause()
+                else:
+                    # Fallback to pause preview
+                    self.pause_preview()
+        except Exception as e:
+            print(f"Pause button error: {e}")
+            # Fallback to simulation mode behavior
+            self.pause_preview()
+
+    def handle_resume_button(self):
+        """Route resume button based on current mode"""
+        try:
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                # In simulation mode: Resume preview
+                self.resume_preview()
+            else:
+                # In hardware mode: Resume execution
+                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
+                    self.button_mqtt_integration.handle_resume()
+                else:
+                    # Fallback to resume preview
+                    self.resume_preview()
+        except Exception as e:
+            print(f"Resume button error: {e}")
+            # Fallback to simulation mode behavior
+            self.resume_preview()
+
+    def handle_enable_outputs_button(self):
+        """Handle enable outputs button (hardware mode only)"""
+        import time
+        timestamp = time.time()
+        print(f"MainWindow: handle_enable_outputs_button called at {timestamp}")
+
+        # Prevent double processing by checking if we're already processing
+        if hasattr(self, '_processing_enable_outputs') and self._processing_enable_outputs:
+            print("MainWindow: Already processing enable outputs, skipping duplicate call")
+            return
+
+        self._processing_enable_outputs = True
+        try:
+            if hasattr(self.system_mode, 'handle_enable_outputs_button'):
+                # Get the actual state from the backend
+                new_state = self.system_mode.handle_enable_outputs_button()
+                print(f"MainWindow: Enable outputs button processed at {timestamp}, new state: {new_state}")
+
+                # Update the button UI to reflect the actual backend state
+                self.update_enable_outputs_button_ui(new_state)
+            else:
+                print("Enable outputs: Hardware mode not available")
+        except Exception as e:
+            print(f"Enable outputs error: {e}")
+        finally:
+            self._processing_enable_outputs = False
+
+    def update_enable_outputs_button_ui(self, enabled_state):
+        """Update the enable outputs button UI to reflect the actual backend state"""
+        print(f"MainWindow: update_enable_outputs_button_ui called with state: {enabled_state}")
+        try:
+            if hasattr(self, 'button_bar') and hasattr(self.button_bar, 'update_enable_outputs_state'):
+                print("MainWindow: Calling button_bar.update_enable_outputs_state")
+                self.button_bar.update_enable_outputs_state(enabled_state)
+                if enabled_state:
+                    print("Button UI updated: DISABLE OUTPUTS (red)")
+                else:
+                    print("Button UI updated: ENABLE OUTPUTS (green)")
+            else:
+                print("Button bar update method not available")
+        except Exception as e:
+            print(f"Error updating enable outputs button UI: {e}")
+
+    def handle_arm_outputs_button(self):
+        """Handle arm outputs button (hardware mode only)"""
+        try:
+            if hasattr(self.system_mode, 'handle_arm_outputs_button'):
+                # Get the actual state from the backend
+                new_state = self.system_mode.handle_arm_outputs_button()
+                print(f"Arm outputs button processed, new state: {new_state}")
+
+                # Update the button UI to reflect the actual backend state
+                self.update_arm_outputs_button_ui(new_state)
+            else:
+                print("Arm outputs: Hardware mode not available")
+        except Exception as e:
+            print(f"Arm outputs error: {e}")
+
+    def update_arm_outputs_button_ui(self, armed_state):
+        """Update the arm outputs button UI to reflect the actual backend state"""
+        try:
+            if hasattr(self, 'button_bar') and hasattr(self.button_bar, 'update_arm_outputs_state'):
+                self.button_bar.update_arm_outputs_state(armed_state)
+                if armed_state:
+                    print("Button UI updated: DISARM OUTPUTS (red)")
+                else:
+                    print("Button UI updated: ARM OUTPUTS (green)")
+            else:
+                print("Button bar update method not available")
+        except Exception as e:
+            print(f"Error updating arm outputs button UI: {e}")
+
+    def handle_execute_cue_button(self):
+        """Handle execute cue button (hardware mode only)"""
+        try:
+            if hasattr(self.system_mode, 'handle_execute_cue_button'):
+                # Get selected cue data
+                selected_cue = {'cue_id': 'manual', 'name': 'Manual Cue'}
+                asyncio.create_task(self.system_mode.handle_execute_cue_button(selected_cue))
+            else:
+                print("Execute cue: Hardware mode not available")
+        except Exception as e:
+            print(f"Execute cue error: {e}")
+
+    def execute_show_via_mqtt(self):
+        """Execute complete show via MQTT (sequential cue execution)"""
+        try:
+            # Get all cues from the table
+            show_cues = self.get_all_cues_for_execution()
+
+            if show_cues:
+                print(f"Executing show via MQTT: {len(show_cues)} cues")
+                # Execute via MQTT integration
+                if hasattr(self.button_mqtt_integration, 'handle_execute_show'):
+                    self.button_mqtt_integration.handle_execute_show(show_cues)
+                else:
+                    # Fallback to system mode
+                    asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues))
+            else:
+                print("No cues available for execution")
+
+        except Exception as e:
+            print(f"MQTT show execution error: {e}")
+
+    def execute_show_via_system_mode(self):
+        """Execute complete show via system mode directly"""
+        try:
+            # Get all cues from the table
+            show_cues = self.get_all_cues_for_execution()
+
+            if show_cues:
+                print(f"Executing show via system mode: {len(show_cues)} cues")
+                asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues))
+            else:
+                print("No cues available for execution")
+
+        except Exception as e:
+            print(f"System mode show execution error: {e}")
+
+    def get_all_cues_for_execution(self):
+        """Get all cues from the cue table formatted for execution"""
+        try:
+            if hasattr(self, 'cue_table') and hasattr(self.cue_table, 'model'):
+                # Get cues from the table model
+                cues_data = getattr(self.cue_table.model, '_data', [])
+
+                # Format cues for execution
+                formatted_cues = []
+                for i, cue in enumerate(cues_data):
+                    formatted_cue = {
+                        'cue_number': i + 1,
+                        'cue_id': cue.get('cue_id', f'cue_{i + 1}'),
+                        'name': cue.get('name', f'Cue {i + 1}'),
+                        'outputs': cue.get('outputs', []),
+                        'duration_ms': cue.get('duration_ms', 1000),
+                        'delay_ms': cue.get('delay_ms', 0),
+                        'description': cue.get('description', '')
+                    }
+                    formatted_cues.append(formatted_cue)
+
+                return formatted_cues
+            else:
+                print("Cue table not available")
+                return []
+
+        except Exception as e:
+            print(f"Error getting cues for execution: {e}")
+            return []
+
+    def connect_mqtt_signals(self):
+        """Connect MQTT integration signals to UI updates"""
+        try:
+            # Connect system mode signals
+            if hasattr(self.system_mode, 'connection_status_changed'):
+                self.system_mode.connection_status_changed.connect(self.update_connection_status)
+            if hasattr(self.system_mode, 'error_occurred'):
+                self.system_mode.error_occurred.connect(self.handle_mqtt_error)
+            if hasattr(self.system_mode, 'hardware_status_updated'):
+                self.system_mode.hardware_status_updated.connect(self.update_hardware_status)
+
+            # Connect button integration signals (only if button_mqtt_integration exists)
+            if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
+                if hasattr(self.button_mqtt_integration, 'button_state_changed'):
+                    self.button_mqtt_integration.button_state_changed.connect(self.update_button_state)
+                if hasattr(self.button_mqtt_integration, 'execution_status_changed'):
+                    self.button_mqtt_integration.execution_status_changed.connect(self.update_execution_status)
+                if hasattr(self.button_mqtt_integration, 'show_progress_updated'):
+                    self.button_mqtt_integration.show_progress_updated.connect(self.update_show_progress)
+
+            # Connect show execution manager signals (use correct signal names)
+            if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
+                if hasattr(self.show_execution_manager, 'cue_executed'):
+                    self.show_execution_manager.cue_executed.connect(self.handle_cue_executed)
+                if hasattr(self.show_execution_manager, 'show_completed'):
+                    self.show_execution_manager.show_completed.connect(self.handle_show_completed)
+                if hasattr(self.show_execution_manager, 'show_paused'):  # Correct signal name
+                    self.show_execution_manager.show_paused.connect(self.handle_execution_paused)
+                if hasattr(self.show_execution_manager, 'show_resumed'):  # Correct signal name
+                    self.show_execution_manager.show_resumed.connect(self.handle_execution_resumed)
+
+            # Connect GPIO controller signals (use correct signal names)
+            if hasattr(self, 'gpio_controller') and self.gpio_controller:
+                if hasattr(self.gpio_controller, 'gpio_state_changed'):  # Correct signal name
+                    self.gpio_controller.gpio_state_changed.connect(self.handle_gpio_state_changed)
+                if hasattr(self.gpio_controller, 'error_occurred'):
+                    self.gpio_controller.error_occurred.connect(self.handle_gpio_error)
+
+        except Exception as e:
+            print(f"Warning: Could not connect all MQTT signals: {e}")
+            # Continue without MQTT signals - maintain existing functionality
+
+    def update_connection_status(self, connected: bool, status_message: str):
+        """Update UI based on MQTT connection status"""
+        if connected:
+            self.statusBar().showMessage(f"MQTT Connected: {status_message}")
+            self.statusBar().setStyleSheet("background-color: #2ecc71; color: white;")
+        else:
+            self.statusBar().showMessage(f"MQTT Disconnected: {status_message}")
+            self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+
+    def handle_mqtt_error(self, error_message: str):
+        """Handle MQTT errors"""
+        self.statusBar().showMessage(f"MQTT Error: {error_message}")
+        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+
+    def update_hardware_status(self, status_data: dict):
+        """Update hardware status display"""
+        # Update status bar with hardware info
+        if 'outputs_enabled' in status_data:
+            enabled_count = sum(status_data['outputs_enabled'])
+            total_count = len(status_data['outputs_enabled'])
+            self.statusBar().showMessage(f"Hardware: {enabled_count}/{total_count} outputs enabled")
+
+    def update_button_state(self, button_name: str, enabled: bool):
+        """Update button enabled/disabled state"""
+        if button_name in self.buttons:
+            self.buttons[button_name].setEnabled(enabled)
+
+    def update_execution_status(self, status_message: str):
+        """Update execution status in UI"""
+        self.statusBar().showMessage(status_message)
+
+    def update_show_progress(self, progress_info: dict):
+        """Update show execution progress"""
+        if 'current_cue' in progress_info and 'total_cues' in progress_info:
+            current = progress_info['current_cue']
+            total = progress_info['total_cues']
+            self.statusBar().showMessage(f"Show Progress: {current}/{total} cues executed")
+
+    def handle_cue_executed(self, cue_id: int):
+        """Handle individual cue execution"""
+        self.statusBar().showMessage(f"Executed cue {cue_id}")
+
+    def handle_show_completed(self):
+        """Handle show completion"""
+        self.statusBar().showMessage("Show execution completed")
+        self.statusBar().setStyleSheet("background-color: #2ecc71; color: white;")
+
+    def handle_execution_paused(self):
+        """Handle show execution pause"""
+        self.statusBar().showMessage("Show execution paused")
+        self.statusBar().setStyleSheet("background-color: #f39c12; color: white;")
+
+    def handle_execution_resumed(self):
+        """Handle show execution resume"""
+        self.statusBar().showMessage("Show execution resumed")
+        self.statusBar().setStyleSheet("background-color: #3498db; color: white;")
+
+    def handle_gpio_state_changed(self, pin: int, state: bool):
+        """Handle GPIO pin state changes"""
+        self.statusBar().showMessage(f"GPIO Pin {pin}: {'HIGH' if state else 'LOW'}")
+
+    def handle_gpio_error(self, error_message: str):
+        """Handle GPIO errors"""
+        self.statusBar().showMessage(f"GPIO Error: {error_message}")
+        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
 
     def load_test_data(self):
         """Load sample data into both table and LED panel for testing"""
@@ -165,7 +555,6 @@ class MainWindow(QMainWindow):
                 self.led_panel.handle_cue_selection(cue_data)
         else:
             self.led_panel.handle_cue_selection(None)
-
 
     def show_cue_creator(self):
         """Show cue creator dialog"""
@@ -446,24 +835,105 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Delete Error", f"Error deleting all cues: {str(e)}")
 
+    def show_led_panel_selector(self):
+        """Show the LED panel view selector dialog"""
+        try:
+            # Import the LED selector dialog
+            from views.dialogs.led_selector_dialog import LedSelectorDialog
+
+            # Get current view from LED panel manager
+            current_view = self.led_panel.get_current_view_name()
+
+            # Create and show dialog
+            dialog = LedSelectorDialog(self, current_view)
+            dialog.view_changed.connect(self.handle_led_panel_view_change)
+
+            dialog.exec()
+
+        except Exception as e:
+            print(f"Error showing LED panel selector: {str(e)}")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "LED Panel Error", f"Could not open LED panel selector: {str(e)}")
+
+    def handle_led_panel_view_change(self, new_view):
+        """Handle LED panel view change"""
+        try:
+            if new_view.startswith("preview_"):
+                # Handle preview mode
+                preview_view = new_view.replace("preview_", "")
+                print(f"Previewing LED panel view: {preview_view}")
+                # You could implement temporary preview here if desired
+            else:
+                # Handle permanent view change
+                print(f"Changing LED panel view to: {new_view}")
+                self.led_panel.switch_to_view(new_view)
+
+                # Update LED PANEL button text
+                if hasattr(self, 'button_bar') and hasattr(self.button_bar, 'update_led_panel_button'):
+                    self.button_bar.update_led_panel_button(new_view)
+
+                # Update status bar
+                self.statusBar().showMessage(f"LED panel view changed to: {new_view.title()}")
+
+        except Exception as e:
+            print(f"Error changing LED panel view: {str(e)}")
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.critical(self, "View Change Error", f"Could not change LED panel view: {str(e)}")
+
     def show_mode_selector(self):
         """Show the system mode selector dialog"""
+        # Prevent multiple dialog instances
+        if hasattr(self, '_mode_dialog_open') and self._mode_dialog_open:
+            print("Mode selector dialog already open, ignoring request")
+            return
+
         print("Opening mode selector dialog")
-        dialog = ModeSelector(
-            current_mode=self.system_mode.get_mode(),
-            connection_settings=self.system_mode.connection_settings,
-            communication_method=self.system_mode.communication_method,
-            parent=self
-        )
+        self._mode_dialog_open = True
 
-        # Connect mode changed signal
-        dialog.mode_changed.connect(self.queue_mode_change)
+        try:
+            dialog = ModeSelector(
+                current_mode=self.system_mode.get_mode(),
+                connection_settings=self.system_mode.connection_settings,
+                communication_method=self.system_mode.communication_method,
+                parent=self
+            )
 
-        # Show dialog
-        if dialog.exec() == QDialog.Accepted:
-            print("Mode selector dialog accepted")
-        else:
-            print("Mode selector dialog cancelled")
+            # Connect mode changed signal
+            dialog.mode_changed.connect(self.queue_mode_change)
+
+            # Connect professional MQTT config changes
+            if hasattr(dialog, 'professional_mqtt_config_changed'):
+                dialog.professional_mqtt_config_changed.connect(self.handle_professional_mqtt_config)
+
+            # Show dialog
+            result = dialog.exec()
+
+            if result == QDialog.Accepted:
+                print("Mode selector dialog accepted")
+
+                # Handle professional MQTT configuration if available
+                if hasattr(dialog, 'professional_mqtt_config'):
+                    try:
+                        self.system_mode.configure_professional_mqtt(dialog.professional_mqtt_config)
+                        self.statusBar().showMessage("Professional MQTT configuration updated")
+                    except Exception as e:
+                        self.statusBar().showMessage(f"MQTT Config Error: {str(e)}")
+                        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+            else:
+                print("Mode selector dialog cancelled")
+
+        finally:
+            # Always reset the flag when dialog is closed
+            self._mode_dialog_open = False
+
+    def handle_professional_mqtt_config(self, config: dict):
+        """Handle professional MQTT configuration changes"""
+        try:
+            self.system_mode.configure_professional_mqtt(config)
+            self.statusBar().showMessage("Professional MQTT configuration updated")
+        except Exception as e:
+            self.statusBar().showMessage(f"MQTT Config Error: {str(e)}")
+            self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
 
     def queue_mode_change(self, mode, connection_settings, communication_method="mqtt"):
         """Queue the mode change operation"""
@@ -482,8 +952,8 @@ class MainWindow(QMainWindow):
             self.system_mode.set_communication_method(communication_method)
 
             # Then update the system mode
-            await self.system_mode.set_mode(mode, connection_settings)
-            print("Mode set successfully")
+            result = await self.system_mode.set_mode(mode, connection_settings)
+            print(f"Mode set successfully, result: {result}")
 
             # Schedule UI updates to run in the main thread
             self.update_mode_buttons_text()
@@ -493,12 +963,14 @@ class MainWindow(QMainWindow):
             # If hardware mode, attempt connection
             if mode == "hardware":
                 print("Attempting hardware connection...")
-                # Create a new event loop for the connection
-                connection_loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(connection_loop)
-
                 try:
-                    success, message = await self.system_mode.connect_to_hardware()
+                    # Use the existing event loop instead of creating a new one
+                    connection_result = await self.system_mode.connect_to_hardware()
+                    if connection_result is None:
+                        print("Warning: connect_to_hardware returned None")
+                        success, message = False, "Connection method returned None"
+                    else:
+                        success, message = connection_result
                     print(f"Connection attempt result: {success}, {message}")
 
                     # Schedule UI updates back in the main thread
@@ -511,8 +983,11 @@ class MainWindow(QMainWindow):
                         QMetaObject.invokeMethod(self, "_show_warning_message",
                                                  Qt.ConnectionType.QueuedConnection,
                                                  Q_ARG(str, message))
-                finally:
-                    connection_loop.close()
+                except Exception as connection_error:
+                    print(f"Error during hardware connection: {connection_error}")
+                    QMetaObject.invokeMethod(self, "_show_error_message",
+                                             Qt.ConnectionType.QueuedConnection,
+                                             Q_ARG(str, f"Connection failed: {str(connection_error)}"))
 
         except Exception as e:
             print(f"Error in _safe_mode_change: {str(e)}")
@@ -645,6 +1120,9 @@ class MainWindow(QMainWindow):
             # Show the dialog
             dialog.exec()
 
+            # Explicitly delete the dialog after it's closed to prevent it from reappearing
+            dialog.deleteLater()
+
         except Exception as e:
             print(f"Error showing music manager: {str(e)}")
             traceback.print_exc()
@@ -656,17 +1134,45 @@ class MainWindow(QMainWindow):
             # Create and show the generator prompt dialog
             dialog = GeneratorPromptDialog(self)
 
-            # Connect signals to handler methods
-            dialog.random_show_selected.connect(self.generate_random_show)
-            dialog.musical_show_selected.connect(self.generate_musical_show)
+            # Connect signals to handler methods with dialog cleanup
+            dialog.random_show_selected.connect(lambda: self._handle_random_show_selection(dialog))
+            dialog.musical_show_selected.connect(lambda: self._handle_musical_show_selection(dialog))
 
-            # Show the dialog (modal)
-            dialog.exec()
+            # Show the dialog (non-modal to prevent blocking)
+            dialog.show()
 
         except Exception as e:
             print(f"Error showing generator prompt: {str(e)}")
             traceback.print_exc()
             QMessageBox.critical(self, "Generator Error", f"Could not open generator: {str(e)}")
+
+    def _handle_random_show_selection(self, dialog):
+        """Handle random show selection and cleanup dialog"""
+        try:
+            # Close and delete the dialog immediately
+            dialog.close()
+            dialog.deleteLater()
+
+            # Generate the random show
+            self.generate_random_show()
+
+        except Exception as e:
+            print(f"Error handling random show selection: {str(e)}")
+            traceback.print_exc()
+
+    def _handle_musical_show_selection(self, dialog):
+        """Handle musical show selection and cleanup dialog"""
+        try:
+            # Close and delete the dialog immediately
+            dialog.close()
+            dialog.deleteLater()
+
+            # Generate the musical show
+            self.generate_musical_show()
+
+        except Exception as e:
+            print(f"Error handling musical show selection: {str(e)}")
+            traceback.print_exc()
 
     def generate_random_show(self):
         """Generate a random show with parameters from dialog"""
@@ -680,6 +1186,9 @@ class MainWindow(QMainWindow):
 
             # Show the dialog
             config_dialog.exec()
+
+            # Explicitly delete the dialog after it's closed to prevent it from reappearing
+            config_dialog.deleteLater()
 
         except Exception as e:
             print(f"Error generating random show: {str(e)}")
@@ -698,7 +1207,7 @@ class MainWindow(QMainWindow):
 
             if not generated_cues:
                 QMessageBox.warning(self, "Generation Failed",
-                                   "Failed to generate cues with the given parameters.")
+                                    "Failed to generate cues with the given parameters.")
                 return
 
             # Ask user for confirmation before adding cues
@@ -727,8 +1236,8 @@ class MainWindow(QMainWindow):
                 self.led_panel.updateFromCueData(self.cue_table.model._data, force_refresh=True)
 
                 QMessageBox.information(self, "Show Generated",
-                                      f"Successfully generated a {config_data.duration_minutes}:{config_data.duration_seconds:02d} show "
-                                      f"with {num_cues} cues using {config_data.num_outputs} outputs.")
+                                        f"Successfully generated a {config_data.duration_minutes}:{config_data.duration_seconds:02d} show "
+                                        f"with {num_cues} cues using {config_data.num_outputs} outputs.")
 
         except Exception as e:
             print(f"Error generating random show: {str(e)}")
@@ -747,8 +1256,10 @@ class MainWindow(QMainWindow):
             # Connect the analysis_ready signal to handle the results
             dialog.analysis_ready.connect(self.handle_music_analysis)
 
-            # Show the dialog
-            dialog.exec()
+            # Show the dialog (non-modal to prevent blocking)
+            dialog.show()
+
+            # Note: Dialog will be deleted when closed by user
 
         except Exception as e:
             print(f"Error generating musical show: {str(e)}")
@@ -970,18 +1481,48 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         """Handle application closing"""
         try:
-            # Schedule cleanup
-            asyncio.create_task(self._cleanup())
-            # Give it a moment to complete
-            self.loop.call_later(0.1, super().closeEvent, event)
+            print("Application closing - starting cleanup")
+
+            # Perform synchronous cleanup to avoid event loop issues
+            if self.system_mode:
+                self.system_mode.close_connection_sync()
+
+            # Cleanup MQTT integration components
+            self.cleanup_mqtt_integration()
+
+            print("Cleanup completed successfully")
+            super().closeEvent(event)
         except Exception as e:
             print(f"Error during cleanup: {e}")
             super().closeEvent(event)
 
     async def _cleanup(self):
-        """Cleanup async resources"""
+        """Cleanup async resources (deprecated - use synchronous cleanup in closeEvent)"""
         try:
             if self.system_mode:
                 await self.system_mode.close_connection()
+
+            # Cleanup MQTT integration components
+            self.cleanup_mqtt_integration()
         except Exception as e:
             print(f"Error in cleanup: {e}")
+
+    def cleanup_mqtt_integration(self):
+        """Cleanup MQTT integration components"""
+        try:
+            # Disconnect MQTT
+            if hasattr(self.system_mode, 'disconnect_professional_mqtt'):
+                self.system_mode.disconnect_professional_mqtt()
+
+            # Cleanup GPIO
+            if hasattr(self.gpio_controller, 'cleanup'):
+                self.gpio_controller.cleanup()
+
+            # Stop show execution
+            if hasattr(self.show_execution_manager, 'stop_execution'):
+                self.show_execution_manager.stop_execution()
+
+            print("MQTT integration cleaned up successfully")
+        except Exception as e:
+            print(f"Error during MQTT cleanup: {e}")
+

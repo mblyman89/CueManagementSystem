@@ -1,36 +1,42 @@
 import logging
 import traceback
 from pathlib import Path
+import time
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QFileDialog, QFrame, QGroupBox,
                                QFormLayout, QDialogButtonBox, QMessageBox)
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 import os
 import wave
 import datetime
 from utils.audio.waveform_analyzer import WaveformAnalyzer, Peak
+from utils.audio.performance_monitor import profile_method, monitor
 
 
 class MusicAnalysisDialog(QDialog):
     """
-    Dialog for analyzing music files for show generation
+    OPTIMIZED: Dialog for analyzing music files for show generation
 
     Features:
     - Select .wav music file for analysis
-    - Display file information
-    - Analyze beats and patterns for show generation
+    - Display file information with performance monitoring
+    - Optimized beats and patterns analysis for show generation
+    - Background processing with immediate UI feedback
     """
 
     # Signal emitted when analysis is ready to proceed
     analysis_ready = Signal(dict)
 
-
     def __init__(self, parent=None, led_panel=None, cue_table=None):
         super().__init__(parent)
-        self.setWindowTitle("Music Analysis for Show Generation")
+        self.setWindowTitle("Optimized Music Analysis for Show Generation")
         self.setMinimumWidth(600)
         self.setMinimumHeight(400)
+
+        # Keep dialog on top of main window
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+        print("🎛️ Initializing OptimizedMusicAnalysisDialog")
 
         # Configure logging
         self.logger = logging.getLogger(__name__)
@@ -41,8 +47,12 @@ class MusicAnalysisDialog(QDialog):
         self.led_panel = led_panel  # Store the reference
         self.cue_table = cue_table
 
-        # Create analyzer instance
+        # OPTIMIZATION: Create optimized analyzer instance
+        print("🔧 Creating optimized WaveformAnalyzer instance")
         self.analyzer = WaveformAnalyzer()
+
+        # OPTIMIZATION: Performance tracking
+        self.dialog_start_time = time.time()
 
         # Initialize UI
         self.init_ui()
@@ -59,6 +69,13 @@ class MusicAnalysisDialog(QDialog):
         title_label.setStyleSheet("font-size: 18px; font-weight: bold; margin-bottom: 10px;")
         title_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(title_label)
+
+        # Check if librosa is available and show warning if not
+        if hasattr(self.analyzer, 'LIBROSA_AVAILABLE') and not self.analyzer.LIBROSA_AVAILABLE:
+            warning_label = QLabel("Warning: Advanced audio analysis is limited (librosa not available)")
+            warning_label.setStyleSheet("color: #e74c3c; font-weight: bold; margin-bottom: 10px;")
+            warning_label.setAlignment(Qt.AlignCenter)
+            main_layout.addWidget(warning_label)
 
         # Description
         description = QLabel(
@@ -135,11 +152,26 @@ class MusicAnalysisDialog(QDialog):
         analysis_note.setStyleSheet("color: gray; font-style: italic; margin-top: 10px;")
         main_layout.addWidget(analysis_note)
 
-        # Button box
-        button_box = QDialogButtonBox()
+        # Custom button layout to ensure correct positioning
+        button_layout = QHBoxLayout()
 
-        # Analyze button
-        self.analyze_btn = QPushButton("Analyze Song")
+        # Cancel button (left side)
+        cancel_btn = QPushButton("Cancel")
+        cancel_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #7f8c8d;
+                color: white;
+                border-radius: 5px;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #95a5a6;
+            }
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        # Generate Waveform button (right side)
+        self.analyze_btn = QPushButton("Generate Waveform")
         self.analyze_btn.setEnabled(False)  # Disabled until file selected
         self.analyze_btn.setStyleSheet("""
             QPushButton {
@@ -158,28 +190,18 @@ class MusicAnalysisDialog(QDialog):
         """)
         self.analyze_btn.clicked.connect(self.analyze_music)
 
-        # Cancel button
-        cancel_btn = QPushButton("Cancel")
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #7f8c8d;
-                color: white;
-                border-radius: 5px;
-                padding: 10px 20px;
-            }
-            QPushButton:hover {
-                background-color: #95a5a6;
-            }
-        """)
-        cancel_btn.clicked.connect(self.reject)
+        # Add buttons to layout: Cancel on left, spacer, Generate Waveform on right
+        button_layout.addWidget(cancel_btn)
+        button_layout.addStretch()  # This pushes buttons to opposite sides
+        button_layout.addWidget(self.analyze_btn)
 
-        button_box.addButton(self.analyze_btn, QDialogButtonBox.AcceptRole)
-        button_box.addButton(cancel_btn, QDialogButtonBox.RejectRole)
+        main_layout.addLayout(button_layout)
 
-        main_layout.addWidget(button_box)
-
+    @profile_method("select_music_file")
     def select_music_file(self):
-        """Open file dialog to select a music file"""
+        """OPTIMIZED: Open file dialog to select a music file with performance monitoring"""
+        print("📂 Opening optimized file selection dialog")
+
         file_path, _ = QFileDialog.getOpenFileName(
             self,
             "Select Music File",
@@ -194,11 +216,17 @@ class MusicAnalysisDialog(QDialog):
                 return
 
             try:
+                print(f"🎵 Loading file info for: {os.path.basename(file_path)}")
+                load_start = time.time()
+
                 # Get file info
                 file_info = self.get_wav_file_info(file_path)
 
                 # Store file info
                 self.music_file_info = file_info
+
+                load_time = time.time() - load_start
+                print(f"⚡ File info loaded in {load_time:.3f}s")
 
                 # Update UI
                 self.file_path_label.setText(os.path.basename(file_path))
@@ -299,8 +327,11 @@ class MusicAnalysisDialog(QDialog):
 
         return file_info
 
+    @profile_method("analyze_music")
     def analyze_music(self):
-        """Analyze the selected music file"""
+        """OPTIMIZED: Analyze the selected music file with performance improvements"""
+        print("🚀 Starting optimized music analysis workflow")
+
         if not self.music_file_info:
             QMessageBox.warning(self, "No File Selected", "Please select a music file to analyze.")
             return
@@ -311,17 +342,37 @@ class MusicAnalysisDialog(QDialog):
             # Check if cue_table reference exists
             if self.cue_table is None:
                 self.logger.error("Cue table reference is missing.")
-                QMessageBox.critical(self, "Error", "Cue table reference is missing. Please try again from the main window.")
+                QMessageBox.critical(self, "Error",
+                                     "Cue table reference is missing. Please try again from the main window.")
                 return
 
-            # Pass led_panel and cue_table references to WaveformAnalysisDialog
+            # OPTIMIZATION: Print performance summary before opening dialog
+            if hasattr(self, 'analyzer') and self.analyzer:
+                print(f"📊 {monitor.get_performance_summary()}")
+
+            # Pass led_panel and cue_table references to OptimizedWaveformAnalysisDialog
+            print("🎛️ Opening optimized waveform analysis dialog")
             waveform_dialog = WaveformAnalysisDialog(self.music_file_info, self, self.led_panel, self.cue_table)
 
-            waveform_dialog.set_analyzer(self.analyzer)
+            # Create new comprehensive analyzer for drum detection
+            from utils.audio.waveform_analyzer import WaveformAnalyzer as ComprehensiveAnalyzer
+            comprehensive_analyzer = ComprehensiveAnalyzer()
+
+            # Load the file into the comprehensive analyzer
+            if comprehensive_analyzer.load_file(self.music_file_info['path']):
+                print("🎵 File loaded into comprehensive analyzer")
+                waveform_dialog.set_analyzer(comprehensive_analyzer)
+            else:
+                print("⚠️ Failed to load file into comprehensive analyzer, using fallback")
+                waveform_dialog.set_analyzer(self.analyzer)
+
             waveform_dialog.show_generation_ready.connect(self.handle_waveform_ready)
 
-            self.accept()  # Close this dialog
-            waveform_dialog.exec()
+            # CRITICAL FIX: Show waveform dialog BEFORE closing this dialog
+            waveform_dialog.showMaximized()  # Show maximized non-modally first
+
+            # Use QTimer to delay closing this dialog to ensure proper display
+            QTimer.singleShot(100, self.accept)  # Close this dialog after 100ms delay
 
         except Exception as e:
             traceback.print_exc()
@@ -340,11 +391,11 @@ class MusicAnalysisDialog(QDialog):
         # Connect signals
         waveform_dialog.show_generation_ready.connect(self.handle_waveform_ready)
 
-        # Close this dialog
-        self.accept()
+        # Show the waveform analysis dialog first
+        waveform_dialog.showMaximized()  # Show maximized non-modally
 
-        # Show the waveform analysis dialog
-        waveform_dialog.exec()
+        # Close this dialog after a short delay
+        QTimer.singleShot(100, self.accept)
 
     def handle_waveform_ready(self, music_file_info):
         """Handle the signal from waveform dialog when analysis is ready"""

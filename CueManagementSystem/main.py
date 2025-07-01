@@ -1,24 +1,27 @@
 import sys
 import asyncio
+import os
 from PySide6.QtWidgets import QApplication
 from views.main_window import MainWindow
-from qasync import QEventLoop, QApplication
+from PySide6.QtAsyncio.events import QAsyncioEventLoop
+
+# Suppress Qt layer-backing warnings on macOS
+os.environ["QT_MAC_WANTS_LAYER"] = "1"
 
 
-async def main():
+def main():
     app = QApplication.instance()
     if app is None:
         app = QApplication(sys.argv)
 
-    loop = QEventLoop(app)
+    loop = QAsyncioEventLoop(app)
     asyncio.set_event_loop(loop)
 
     window = MainWindow()
     window.show()
 
-    with loop:
-        await loop.run_forever()
+    loop.run_forever()
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()

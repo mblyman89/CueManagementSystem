@@ -47,7 +47,7 @@ class CueController:
             cue_type=data.get("cue_type", ""),
             outputs=self._format_outputs(data),
             delay=data.get("delay", 0.0),
-            execute_time=data.get("execute_time", "0:00.00"),
+            execute_time=data.get("execute_time", "00:00.0000"),
             output_values=data.get("output_values", [])
         )
 

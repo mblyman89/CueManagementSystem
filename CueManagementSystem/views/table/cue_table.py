@@ -1,7 +1,8 @@
-from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog
+from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog, QWidget
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
-from PySide6.QtGui import QColor, QDropEvent
+from PySide6.QtGui import QColor, QDropEvent, QPainter
 from views.dialogs.cue_editor import CueEditorDialog
+
 
 class CueTableModel(QAbstractTableModel):
     def __init__(self):
@@ -173,6 +174,18 @@ class CueTableModel(QAbstractTableModel):
         self.layoutChanged.emit()  # Notify views of changes
         self.update_led_panel()
 
+    def add_cues_batch(self, cue_data_list):
+        """Add multiple cues efficiently with single UI update"""
+        if not cue_data_list:
+            return
+
+        # Add all cues to data without triggering updates
+        self._data.extend(cue_data_list)
+
+        # Single UI update for all cues
+        self.layoutChanged.emit()
+        self.update_led_panel()
+
     def update_cue(self, index, cue_data):
         """Update an existing cue"""
         if 0 <= index < len(self._data):
@@ -188,12 +201,13 @@ class CueTableModel(QAbstractTableModel):
 
     def update_led_panel(self, force_refresh=False):
         """Update LED panel with current data
-        
+
         Args:
             force_refresh: Force complete refresh of all LEDs (default: False)
         """
         if hasattr(self, 'led_panel'):
             self.led_panel.updateFromCueData(self._data, force_refresh=force_refresh)
+
 
 class CueTableView(QTableView):
     def __init__(self):
@@ -226,7 +240,7 @@ class CueTableView(QTableView):
         # Visual settings
         self.setShowGrid(True)
         self.setGridStyle(Qt.SolidLine)
-        self.setCornerButtonEnabled(False)
+        self.setCornerButtonEnabled(True)
 
         # Set column widths
         header = self.horizontalHeader()
@@ -241,7 +255,7 @@ class CueTableView(QTableView):
         self.setFixedWidth(total_width + self.verticalHeader().width() +
                            self.verticalScrollBar().sizeHint().width())
 
-        # Style the headers and corner
+        # Style the headers
         header_style = """
             QHeaderView::section {
                 background-color: #1a1a2e;
@@ -249,17 +263,13 @@ class CueTableView(QTableView):
                 padding: 5px;
                 border: 1px solid #333344;
             }
-            QTableCornerButton::section {
-                background-color: #1a1a2e;
-                border: 1px solid #333344;
-            }
         """
 
         header.setStyleSheet(header_style)
         self.verticalHeader().setStyleSheet(header_style)
 
-        # Main table styling with drag-drop visual feedback
-        self.setStyleSheet("""
+        # Main table styling with drag-drop visual feedback and corner button
+        table_style = """
             QTableView {
                 background-color: #1a1a2e;
                 gridline-color: #333344;
@@ -278,7 +288,102 @@ class CueTableView(QTableView):
                 background-color: #4CAF50;
                 border: 2px solid #45a049;
             }
-        """)
+            QTableCornerButton::section {
+                background-color: #1a1a2e !important;
+                border: 1px solid #333344 !important;
+            }
+        """
+
+        self.setStyleSheet(table_style)
+
+        # Force corner button styling with additional methods
+        self.apply_corner_button_fix()
+
+    def apply_corner_button_fix(self):
+        """Apply comprehensive fix for the corner button styling"""
+        try:
+            # Enable corner button
+            self.setCornerButtonEnabled(True)
+
+            # Get corner button widget and apply direct styling
+            corner_button = self.findChild(QWidget, "qt_scrollarea_cornerbutton")
+            if corner_button:
+                corner_button.setStyleSheet("""
+                    QWidget {
+                        background-color: #1a1a2e;
+                        border: 1px solid #333344;
+                    }
+                """)
+
+            # Alternative approach: find corner button by class name
+            for child in self.findChildren(QWidget):
+                if child.metaObject().className() == "QTableCornerButton":
+                    child.setStyleSheet("""
+                        QTableCornerButton {
+                            background-color: #1a1a2e;
+                            border: 1px solid #333344;
+                        }
+                    """)
+                    break
+
+        except Exception as e:
+            print(f"Corner button fix error: {e}")
+
+    def showEvent(self, event):
+        """Override show event to apply corner button fix after widget is shown"""
+        super().showEvent(event)
+        # Apply corner button fix when widget becomes visible
+        self.fix_corner_button_after_show()
+
+    def fix_corner_button_after_show(self):
+        """Apply corner button fix after the widget is fully shown"""
+        try:
+            # Force update of all child widgets
+            self.update()
+
+            # Try to find and style the corner button directly
+            corner_button = None
+
+            # Method 1: Find by object name
+            corner_button = self.findChild(QWidget, "qt_scrollarea_cornerbutton")
+
+            # Method 2: Find by iterating through children
+            if not corner_button:
+                for child in self.findChildren(QWidget):
+                    if "corner" in child.objectName().lower() or child.metaObject().className() == "QTableCornerButton":
+                        corner_button = child
+                        break
+
+            # Method 3: Direct corner button access
+            if not corner_button:
+                # Try to access corner button through table view internals
+                if hasattr(self, 'cornerWidget'):
+                    corner_button = self.cornerWidget()
+
+            if corner_button:
+                corner_button.setStyleSheet("""
+                    * {
+                        background-color: #1a1a2e !important;
+                        border: 1px solid #333344 !important;
+                    }
+                """)
+                print("Corner button found and styled successfully")
+            else:
+                print("Corner button not found - using alternative method")
+                # Alternative: disable corner button completely
+                self.setCornerButtonEnabled(False)
+
+        except Exception as e:
+            print(f"Corner button fix after show error: {e}")
+
+    def resizeEvent(self, event):
+        """Override resize event to maintain corner button styling"""
+        super().resizeEvent(event)
+        # Reapply corner button fix on resize
+        try:
+            self.fix_corner_button_after_show()
+        except:
+            pass
 
     def dragEnterEvent(self, event):
         """Handle drag enter event"""
@@ -375,40 +480,40 @@ class CueTableView(QTableView):
                 return
             print(f"Selected row: {index.row()}")
         super().mousePressEvent(event)
-        
+
     def delete_selected_cue(self):
         """Delete the currently selected cue"""
         selection = self.selectionModel()
         if not selection.hasSelection():
             return False
-            
+
         selected_rows = selection.selectedRows()
         if not selected_rows:
             return False
-            
+
         row = selected_rows[0].row()
         if 0 <= row < len(self.model._data):
             # Get the cue number from the first column
             cue_number = self.model._data[row][0]
-            
+
             # Remove the cue from the model
             self.model.remove_cue(cue_number)
             return True
-            
+
         return False
-        
+
     def delete_all_cues(self):
         """Delete all cues from the table"""
         if not self.model._data:
             return False
-            
+
         # Clear the data
         self.model._data = []
-        
+
         # Notify views of the change
         self.model.layoutChanged.emit()
-        
+
         # Update LED panel
         self.model.update_led_panel(force_refresh=True)
-        
+
         return True

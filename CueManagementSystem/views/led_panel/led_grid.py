@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import QWidget, QGridLayout, QSizePolicy
 from PySide6.QtCore import Qt, QSize
-from .led_widget import LedWidget
+from views.led_panel.led_widget import LedWidget
 from views.led_panel.led_animations import LedAnimationController
 
 class LedGrid(QWidget):

@@ -231,7 +231,7 @@ class CueCreatorDialog(QDialog):
         self.execute_time.setRange(0, 1000)
         self.execute_time.setSingleStep(0.1)
         self.execute_time.setMaximum(99999.99)
-        self.execute_time.setDecimals(3)
+        self.execute_time.setDecimals(4)
         self.execute_time.setStyleSheet(doublespinbox_style)
         self.execute_time.setAlignment(Qt.AlignCenter)
         self.execute_time.setButtonSymbols(QDoubleSpinBox.ButtonSymbols.UpDownArrows)
@@ -906,7 +906,7 @@ class CueCreatorDialog(QDialog):
             else:
                 outputs_str = "1"  # Default
 
-        # Format execute_time as 0:00.00 (minutes:seconds.milliseconds)
+        # Format execute_time as 00:00.0000 (minutes:seconds.milliseconds)
         execute_time = cue_data["execute_time"]
         formatted_time = execute_time
 
@@ -921,8 +921,8 @@ class CueCreatorDialog(QDialog):
                 minutes = int(total_seconds // 60)
                 seconds = total_seconds % 60
 
-                # Format as 0:00.00
-                formatted_time = f"{minutes}:{seconds:05.2f}"
+                # Format as 00:00.0000
+                formatted_time = f"{minutes:02d}:{seconds:07.4f}"
 
             elif isinstance(execute_time, str) and ':' in execute_time:
                 # Handle existing time format (could be various formats)
@@ -934,22 +934,22 @@ class CueCreatorDialog(QDialog):
                     total_minutes = int(hours) * 60 + int(minutes)
                     formatted_time = f"{total_minutes}:{seconds}"
 
-                    # Ensure seconds has 2 decimal places
+                    # Ensure seconds has 4 decimal places
                     if '.' not in formatted_time:
                         seconds_val = float(seconds)
-                        formatted_time = f"{total_minutes}:{seconds_val:06.3f}"
+                        formatted_time = f"{total_minutes:02d}:{seconds_val:07.4f}"
 
                 elif len(parts) == 2:  # MM:SS format
                     minutes, seconds = parts
 
-                    # Ensure seconds has 2 decimal places
+                    # Ensure seconds has 4 decimal places
                     if '.' not in seconds:
                         seconds_val = float(seconds)
-                        formatted_time = f"{minutes}:{seconds_val:05.2f}"
+                        formatted_time = f"{minutes:02d}:{seconds_val:07.4f}"
                     else:
-                        # Make sure seconds is properly formatted with 2 decimal places
+                        # Make sure seconds is properly formatted with 4 decimal places
                         seconds_val = float(seconds)
-                        formatted_time = f"{minutes}:{seconds_val:05.2f}"
+                        formatted_time = f"{minutes:02d}:{seconds_val:07.4f}"
         except Exception as e:
             print(f"Error formatting time: {e}")
             # Keep original if conversion fails

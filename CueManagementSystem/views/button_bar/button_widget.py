@@ -2,8 +2,6 @@ from PySide6.QtWidgets import QPushButton, QSizePolicy
 from PySide6.QtCore import Qt, Signal
 from utils.color_utils import lighten_color, darken_color
 
-from utils.color_utils import lighten_color, darken_color
-
 
 class ButtonWidget(QPushButton):
     """
@@ -12,6 +10,7 @@ class ButtonWidget(QPushButton):
     Features:
     - Customizable colors
     - Active/inactive states
+    - Selected/unselected states
     - Consistent styling
     """
 
@@ -20,6 +19,8 @@ class ButtonWidget(QPushButton):
         self.setText(text)
         self.base_color = color
         self.is_active = True
+        self.is_selected = False
+        self.original_color = color
 
         # Set up button appearance
         self.setup_appearance()
@@ -91,11 +92,31 @@ class ButtonWidget(QPushButton):
             self.setCursor(Qt.PointingHandCursor)
         else:
             self.setCursor(Qt.ForbiddenCursor)
-    
+
     def get_active_state(self):
         """Get the active state of the button"""
         return self.is_active
-        
+
+    def set_selected(self, selected):
+        """Set the selected state of the button"""
+        self.is_selected = selected
+        self.setProperty("isSelected", selected)
+
+        # Change color based on selected state
+        if selected:
+            self.base_color = "#8b0000"  # Red color when selected
+        else:
+            self.base_color = self.original_color
+
+        # Update stylesheet
+        self.setStyleSheet(self.generate_stylesheet())
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def get_selected_state(self):
+        """Get the selected state of the button"""
+        return self.is_selected
+
     def mousePressEvent(self, event):
         """Override mouse press event to check active state"""
         if self.is_active:
@@ -103,7 +124,7 @@ class ButtonWidget(QPushButton):
         else:
             # Ignore the event if button is inactive
             event.ignore()
-            
+
     def mouseReleaseEvent(self, event):
         """Override mouse release event to check active state"""
         if self.is_active:
