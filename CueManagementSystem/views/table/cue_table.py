@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog, QWidget
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from PySide6.QtGui import QColor, QDropEvent, QPainter
-from views.dialogs.cue_editor import CueEditorDialog
+from views.dialogs.cue_editor_dialog import CueEditorDialog
 
 
 class CueTableModel(QAbstractTableModel):

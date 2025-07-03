@@ -1,7 +1,6 @@
-import asyncssh
 import logging
 import json
-from typing import Optional, Dict, Any, Callable, List
+from typing import Optional, Dict, Any, List
 from PySide6.QtCore import QObject, Signal, QTimer
 from controllers.hardware_controller import HardwareController
 from hardware.mqtt_client import MQTTClient
@@ -89,7 +88,7 @@ class SystemMode(QObject):
 
         # Large-scale system components
         from controllers.gpio_controller import GPIOController, GPIOConfig
-        from controllers.show_execution_manager import ShowExecutionManager
+        from views.managers.show_execution_manager import ShowExecutionManager
 
         # Initialize GPIO controller with proper configuration for your hardware
         gpio_config = GPIOConfig(

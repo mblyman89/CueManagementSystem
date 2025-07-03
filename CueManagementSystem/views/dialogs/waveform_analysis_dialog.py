@@ -23,7 +23,7 @@ from utils.audio.performance_monitor import profile_method
 from views.waveform.waveform_widget import WaveformView
 from utils.audio.waveform_analyzer import WaveformAnalyzer
 from utils.musical_generator import MusicalGenerator
-from controllers.waveform_controls_panel import WaveformControlsPanel
+from controllers.waveform_controller import WaveformControlsPanel
 
 # Import JSON utilities for safe serialization
 try:
@@ -1059,6 +1059,10 @@ class WaveformAnalysisDialog(QDialog):
             self.waveform_controls_panel.zoom_changed.connect(self._on_zoom_slider_changed)
             self.waveform_controls_panel.zoom_reset_requested.connect(self._on_reset_zoom)
 
+            # CRITICAL FIX: Emit initial control values to ensure waveform displays correctly on load
+            # This ensures the waveform view receives the default settings (Frequency Bands, 0.00 smoothing, 40dB range)
+            QTimer.singleShot(100, self.waveform_controls_panel._emit_all_current_values)
+
     def load_waveform_data(self) -> None:
         """Load and process the waveform data"""
         # Check if we're already processing
@@ -1210,6 +1214,11 @@ class WaveformAnalysisDialog(QDialog):
 
                 # Force initial peak display
                 self._force_peak_display()
+
+                # CRITICAL FIX: Apply initial waveform control settings after waveform is loaded
+                # This ensures the visual display matches the default control values
+                if hasattr(self, 'waveform_controls_panel'):
+                    QTimer.singleShot(200, self.waveform_controls_panel._emit_all_current_values)
 
                 # For comprehensive analyzer, don't check peaks until analysis is done
                 if self.analyzer.is_analyzed:
@@ -1687,8 +1696,8 @@ class WaveformAnalysisDialog(QDialog):
             geom = dialog_state['window_geometry']
             self.setGeometry(geom['x'], geom['y'], geom['width'], geom['height'])
 
-        # Manual peak mode state is now managed by the waveform controls panel
-        # Checkbox state restoration is handled by the controls panel
+            # Manual peak mode state is now managed by the waveform controls panel
+            # Checkbox state restoration is handled by the controls panel
             self._peak_check_start_time = None  # Reset timeout tracking
 
     def _update_position_display(self, position: float) -> None:
@@ -3116,7 +3125,8 @@ class WaveformAnalysisDialog(QDialog):
                     if hasattr(self.waveform_controls_panel, 'restore_peaks_btn'):
                         self.waveform_controls_panel.restore_peaks_btn.setEnabled(True)
                     if hasattr(self.waveform_controls_panel, 'cleanup_filter_btn'):
-                        self.waveform_controls_panel.cleanup_filter_btn.setText(f"🔧 Cleanup Applied ({new_count} peaks)")
+                        self.waveform_controls_panel.cleanup_filter_btn.setText(
+                            f"🔧 Cleanup Applied ({new_count} peaks)")
                         self.waveform_controls_panel.cleanup_filter_btn.setEnabled(False)
 
                 # Update controls panel buttons
@@ -3194,7 +3204,8 @@ class WaveformAnalysisDialog(QDialog):
 
             if peak_count > 1000:
                 # Update cleanup button (it's in the controls panel)
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel, 'cleanup_filter_btn'):
+                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
+                                                                        'cleanup_filter_btn'):
                     self.waveform_controls_panel.cleanup_filter_btn.setEnabled(True)
                     self.waveform_controls_panel.cleanup_filter_btn.setText(f"🔧 Cleanup Filter ({peak_count} peaks)")
                     self.waveform_controls_panel.cleanup_filter_btn.setToolTip(
@@ -3206,10 +3217,12 @@ class WaveformAnalysisDialog(QDialog):
                     self.waveform_controls_panel.set_cleanup_filter_enabled(True)
             else:
                 # Update cleanup button (it's in the controls panel)
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel, 'cleanup_filter_btn'):
+                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
+                                                                        'cleanup_filter_btn'):
                     self.waveform_controls_panel.cleanup_filter_btn.setEnabled(False)
                     self.waveform_controls_panel.cleanup_filter_btn.setText("🔧 Cleanup Filter")
-                    self.waveform_controls_panel.cleanup_filter_btn.setToolTip("Cleanup filter not needed (≤1000 peaks)")
+                    self.waveform_controls_panel.cleanup_filter_btn.setToolTip(
+                        "Cleanup filter not needed (≤1000 peaks)")
 
                 # Update controls panel button
                 if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,

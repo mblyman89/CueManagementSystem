@@ -55,11 +55,11 @@ class ButtonMQTTIntegration(QObject):
     def _connect_button_signals(self):
         """Connect button bar signals to handler methods"""
         try:
-            # Core control buttons
+            # Core control buttons (hardware mode only)
             self.button_bar.enable_outputs.connect(self.handle_enable_outputs)
             self.button_bar.arm_outputs.connect(self.handle_arm_outputs)
             self.button_bar.execute_cue_clicked.connect(self.handle_execute_cue)
-            self.button_bar.execute_all_clicked.connect(self.handle_execute_show)
+            # Note: execute_all_clicked is handled by main_window for mode-aware routing
 
             # Show control buttons
             self.button_bar.stop_clicked.connect(self.handle_abort)
@@ -106,6 +106,12 @@ class ButtonMQTTIntegration(QObject):
     def handle_enable_outputs(self):
         """Handle Enable/Disable Outputs button click"""
         try:
+            # Check if we're in hardware mode
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                self.logger.info("Enable outputs clicked in simulation mode - ignoring")
+                return
+
             self.logger.info("Enable/Disable Outputs button clicked")
 
             # Call system mode handler
@@ -141,6 +147,12 @@ class ButtonMQTTIntegration(QObject):
     def handle_arm_outputs(self):
         """Handle Arm/Disarm Outputs button click"""
         try:
+            # Check if we're in hardware mode
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                self.logger.info("Arm outputs clicked in simulation mode - ignoring")
+                return
+
             self.logger.info("Arm/Disarm Outputs button clicked")
 
             # Check if outputs are enabled first
@@ -176,6 +188,12 @@ class ButtonMQTTIntegration(QObject):
     def handle_execute_cue(self):
         """Handle Execute Cue button click"""
         try:
+            # Check if we're in hardware mode
+            current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+            if current_mode == 'simulation':
+                self.logger.info("Execute cue clicked in simulation mode - ignoring")
+                return
+
             self.logger.info("Execute Cue button clicked")
 
             # Get selected cue from main window
@@ -198,23 +216,25 @@ class ButtonMQTTIntegration(QObject):
             self.logger.error(f"Failed to handle execute cue: {e}")
             self._show_error_message("Execute Cue Error", str(e))
 
-    def handle_execute_show(self):
-        """Handle Execute Show button click"""
+    def handle_execute_show(self, show_cues=None):
+        """Handle Execute Show button click (called from main_window for hardware mode)"""
         try:
-            self.logger.info("Execute Show button clicked")
+            self.logger.info("Execute Show button clicked (hardware mode)")
 
-            # Get all cues from main window
-            show_cues = self._get_all_cues()
+            # Get all cues from main window if not provided
+            if show_cues is None:
+                show_cues = self._get_all_cues()
+
             if not show_cues:
                 self._show_error_message(
                     "No Cues Available",
                     "Please load cues into the table before executing a show."
                 )
-                return
+                return False
 
             # Check system readiness
             if not self._check_system_ready_for_execution():
-                return
+                return False
 
             # Confirm show execution
             reply = QMessageBox.question(
@@ -230,10 +250,14 @@ class ButtonMQTTIntegration(QObject):
             if reply == QMessageBox.Yes:
                 # Execute the show asynchronously
                 asyncio.create_task(self._execute_full_show(show_cues))
+                return True
+
+            return False
 
         except Exception as e:
             self.logger.error(f"Failed to handle execute show: {e}")
             self._show_error_message("Execute Show Error", str(e))
+            return False
 
     def handle_pause(self):
         """Handle Pause button click"""
@@ -316,8 +340,8 @@ class ButtonMQTTIntegration(QObject):
 
             # Check if dialog is already open to prevent multiple instances
             if (self.main_window and
-                hasattr(self.main_window, '_mode_dialog_open') and
-                self.main_window._mode_dialog_open):
+                    hasattr(self.main_window, '_mode_dialog_open') and
+                    self.main_window._mode_dialog_open):
                 self.logger.info("Mode selector dialog already open, ignoring request")
                 return
 

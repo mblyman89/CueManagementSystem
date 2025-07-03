@@ -304,21 +304,17 @@ class ButtonBar(QScrollArea):
                 new_button = ButtonWidget("SIMULATION\nMODE", "#cc5500")
                 self.replace_button("MODE", new_button)
 
-                # Disable EXECUTE CUE button in simulation mode
-                if "EXECUTE CUE" in self.buttons:
-                    self.buttons["EXECUTE CUE"].set_active(False)
-
-                # Disable ENABLE OUTPUTS and ARM OUTPUTS buttons in simulation mode
-                # and reset their selected state
-                if "ENABLE OUTPUTS" in self.buttons:
-                    self.buttons["ENABLE OUTPUTS"].set_active(False)
-                    self.buttons["ENABLE OUTPUTS"].set_selected(False)
-                    self.buttons["ENABLE OUTPUTS"].setText("ENABLE\n OUTPUTS")
-
-                if "ARM OUTPUTS" in self.buttons:
-                    self.buttons["ARM OUTPUTS"].set_active(False)
-                    self.buttons["ARM OUTPUTS"].set_selected(False)
-                    self.buttons["ARM OUTPUTS"].setText("ARM\n OUTPUTS")
+                # Disable hardware-only buttons in simulation mode
+                hardware_buttons = ["EXECUTE CUE", "ENABLE OUTPUTS", "ARM OUTPUTS"]
+                for button_name in hardware_buttons:
+                    if button_name in self.buttons:
+                        self.buttons[button_name].set_active(False)
+                        self.buttons[button_name].set_selected(False)
+                        # Reset text to default state
+                        if button_name == "ENABLE OUTPUTS":
+                            self.buttons[button_name].setText("ENABLE\n OUTPUTS")
+                        elif button_name == "ARM OUTPUTS":
+                            self.buttons[button_name].setText("ARM\n OUTPUTS")
 
                 # Ensure STOP button is present and properly configured
                 if "STOP" in self.buttons:

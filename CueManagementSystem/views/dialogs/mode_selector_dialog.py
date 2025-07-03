@@ -42,7 +42,7 @@ class ModeSelector(QDialog):
             "mqtt_port": 1883
         }
 
-        # Professional MQTT configuration
+        # Advanced MQTT configuration
         self.professional_mqtt_config = {
             'broker_host': 'localhost',
             'broker_port': 1883,
@@ -63,7 +63,7 @@ class ModeSelector(QDialog):
             }
         }
 
-        self.use_professional_mqtt = False
+        self.use_professional_mqtt = True  # Always enabled for hardware mode
 
         # Connection status tracking
         self.ssh_connected = False
@@ -118,9 +118,9 @@ class ModeSelector(QDialog):
         self.basic_tab = self.create_basic_connection_tab()
         self.tab_widget.addTab(self.basic_tab, "Basic Connection")
 
-        # Professional MQTT Tab
+        # Advanced MQTT Tab
         self.professional_tab = self.create_professional_mqtt_tab()
-        self.tab_widget.addTab(self.professional_tab, "Professional MQTT")
+        self.tab_widget.addTab(self.professional_tab, "Advanced MQTT")
 
         # GPIO Pin Assignments Tab
         self.gpio_tab = self.create_gpio_assignments_tab()
@@ -321,7 +321,7 @@ class ModeSelector(QDialog):
             QTextEdit {
                 background-color: #1e1e1e;
                 color: #ffffff;
-                font-family: 'Courier New', monospace;
+                font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
                 font-size: 11pt;
                 border: 2px solid #555555;
                 border-radius: 5px;
@@ -349,7 +349,7 @@ class ModeSelector(QDialog):
             QLineEdit {
                 background-color: #2d2d2d;
                 color: #ffffff;
-                font-family: 'Courier New', monospace;
+                font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
                 font-size: 10pt;
                 border: 1px solid #555555;
                 padding: 5px;
@@ -371,12 +371,8 @@ class ModeSelector(QDialog):
         tab_layout = QVBoxLayout(tab)
         tab_layout.setContentsMargins(5, 5, 5, 5)
 
-        # Enable Professional MQTT checkbox at the top
-        self.enable_professional_mqtt = QCheckBox("Enable Professional MQTT Mode")
-        self.enable_professional_mqtt.setChecked(self.use_professional_mqtt)
-        self.enable_professional_mqtt.toggled.connect(self.toggle_professional_mqtt)
-        self.enable_professional_mqtt.setStyleSheet("font-weight: bold; margin: 5px;")
-        tab_layout.addWidget(self.enable_professional_mqtt)
+        # Advanced MQTT is now enabled by default for hardware mode
+        # No checkbox needed as it's required for hardware functionality
 
         # Create scroll area for the content
         scroll_area = QScrollArea()
@@ -401,8 +397,8 @@ class ModeSelector(QDialog):
         scroll_area.setWidget(scroll_content)
         tab_layout.addWidget(scroll_area)
 
-        # Initial state
-        self.toggle_professional_mqtt()
+        # Advanced MQTT is always enabled for hardware mode
+        self.use_professional_mqtt = True
         self.toggle_ssl_settings()
 
         return tab
@@ -616,26 +612,14 @@ class ModeSelector(QDialog):
 
     def create_broker_settings_section(self, parent_layout):
         """Create broker and connection settings section"""
-        self.professional_settings_group = QGroupBox("Broker & Connection Settings")
-        settings_layout = QFormLayout(self.professional_settings_group)
+        self.professional_settings_group = QGroupBox("Advanced MQTT Settings")
+        settings_layout = QVBoxLayout(self.professional_settings_group)
         settings_layout.setSpacing(8)
 
-        # Broker settings
-        self.prof_broker_host = QLineEdit(self.professional_mqtt_config['broker_host'])
-        self.prof_broker_port = QSpinBox()
-        self.prof_broker_port.setRange(1, 65535)
-        self.prof_broker_port.setValue(self.professional_mqtt_config['broker_port'])
-
-        settings_layout.addRow("Broker Host:", self.prof_broker_host)
-        settings_layout.addRow("Broker Port:", self.prof_broker_port)
-
-        # Authentication
-        self.prof_username = QLineEdit(self.professional_mqtt_config['username'])
-        self.prof_password = QLineEdit(self.professional_mqtt_config['password'])
-        self.prof_password.setEchoMode(QLineEdit.Password)
-
-        settings_layout.addRow("Username:", self.prof_username)
-        settings_layout.addRow("Password:", self.prof_password)
+        # Create form layout for centered content
+        form_widget = QWidget()
+        form_layout = QFormLayout(form_widget)
+        form_layout.setSpacing(8)
 
         # Client settings
         self.prof_client_id = QLineEdit(self.professional_mqtt_config['client_id'])
@@ -643,8 +627,8 @@ class ModeSelector(QDialog):
         self.prof_keepalive.setRange(10, 300)
         self.prof_keepalive.setValue(self.professional_mqtt_config['keepalive'])
 
-        settings_layout.addRow("Client ID:", self.prof_client_id)
-        settings_layout.addRow("Keepalive (seconds):", self.prof_keepalive)
+        form_layout.addRow("Client ID:", self.prof_client_id)
+        form_layout.addRow("Keepalive (seconds):", self.prof_keepalive)
 
         # QoS Level
         self.prof_qos = QComboBox()
@@ -653,7 +637,15 @@ class ModeSelector(QDialog):
         self.prof_qos.addItem("QoS 2 - Exactly once (Recommended)", 2)
         self.prof_qos.setCurrentIndex(self.professional_mqtt_config['qos_level'])
 
-        settings_layout.addRow("QoS Level:", self.prof_qos)
+        form_layout.addRow("QoS Level:", self.prof_qos)
+
+        # Center the form
+        center_layout = QHBoxLayout()
+        center_layout.addStretch()
+        center_layout.addWidget(form_widget)
+        center_layout.addStretch()
+
+        settings_layout.addLayout(center_layout)
 
         parent_layout.addWidget(self.professional_settings_group)
 
@@ -741,7 +733,7 @@ class ModeSelector(QDialog):
         test_layout = QVBoxLayout(test_group)
         test_layout.setSpacing(8)
 
-        self.prof_test_button = QPushButton("Test Professional MQTT Connection")
+        self.prof_test_button = QPushButton("Test Advanced MQTT Connection")
         self.prof_test_button.setMinimumHeight(35)
         self.prof_test_button.clicked.connect(self.test_professional_mqtt)
 
@@ -793,11 +785,10 @@ class ModeSelector(QDialog):
             self.tab_widget.setEnabled(is_hardware_mode)
 
     def toggle_professional_mqtt(self):
-        """Toggle professional MQTT settings visibility"""
-        enabled = self.enable_professional_mqtt.isChecked()
-        self.use_professional_mqtt = enabled
+        """Advanced MQTT is always enabled for hardware mode"""
+        self.use_professional_mqtt = True
         if hasattr(self, 'professional_settings_group'):
-            self.professional_settings_group.setEnabled(enabled)
+            self.professional_settings_group.setEnabled(True)
 
     def toggle_ssl_settings(self):
         """Toggle SSL settings visibility"""
@@ -1052,7 +1043,7 @@ class ModeSelector(QDialog):
         self.prof_test_progress.setVisible(False)
         self.prof_test_button.setEnabled(True)
 
-        result_text = f"Professional MQTT Connection Test Results:\n"
+        result_text = f"Advanced MQTT Connection Test Results:\n"
         result_text += f"Broker: {config['broker_host']}:{config['broker_port']}\n"
         result_text += f"SSL/TLS: {'Enabled' if config['use_ssl'] else 'Disabled'}\n"
         result_text += f"QoS Level: {config['qos_level']}\n"
@@ -1064,10 +1055,10 @@ class ModeSelector(QDialog):
     def get_professional_mqtt_config(self):
         """Get current professional MQTT configuration from UI"""
         return {
-            'broker_host': self.prof_broker_host.text(),
-            'broker_port': self.prof_broker_port.value(),
-            'username': self.prof_username.text(),
-            'password': self.prof_password.text(),
+            'broker_host': self.host_input.text(),  # Use basic connection host
+            'broker_port': self.mqtt_port_input.value(),  # Use basic connection MQTT port
+            'username': self.username_input.text(),  # Use basic connection username
+            'password': self.password_input.text(),  # Use basic connection password
             'use_ssl': self.prof_use_ssl.isChecked(),
             'ssl_cert_path': self.prof_ssl_cert.text(),
             'ssl_key_path': self.prof_ssl_key.text(),
@@ -1089,7 +1080,7 @@ class ModeSelector(QDialog):
 
         file_path, _ = QFileDialog.getSaveFileName(
             self,
-            "Save Professional MQTT Configuration",
+            "Save Advanced MQTT Configuration",
             "professional_mqtt_config.json",
             "JSON Files (*.json);;All Files (*)"
         )
@@ -1101,7 +1092,7 @@ class ModeSelector(QDialog):
                 QMessageBox.information(
                     self,
                     "Configuration Saved",
-                    f"Professional MQTT configuration saved to:\n{file_path}"
+                    f"Advanced MQTT configuration saved to:\n{file_path}"
                 )
             except Exception as e:
                 QMessageBox.critical(
@@ -1114,7 +1105,7 @@ class ModeSelector(QDialog):
         """Load professional MQTT configuration from file"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Load Professional MQTT Configuration",
+            "Load Advanced MQTT Configuration",
             "",
             "JSON Files (*.json);;All Files (*)"
         )
@@ -1125,10 +1116,11 @@ class ModeSelector(QDialog):
                     config = json.load(f)
 
                 # Update UI with loaded configuration
-                self.prof_broker_host.setText(config.get('broker_host', ''))
-                self.prof_broker_port.setValue(config.get('broker_port', 1883))
-                self.prof_username.setText(config.get('username', ''))
-                self.prof_password.setText(config.get('password', ''))
+                # Connection settings now come from basic tab, so update those instead
+                self.host_input.setText(config.get('broker_host', ''))
+                self.mqtt_port_input.setValue(config.get('broker_port', 1883))
+                self.username_input.setText(config.get('username', ''))
+                self.password_input.setText(config.get('password', ''))
                 self.prof_use_ssl.setChecked(config.get('use_ssl', False))
                 self.prof_ssl_cert.setText(config.get('ssl_cert_path', ''))
                 self.prof_ssl_key.setText(config.get('ssl_key_path', ''))
@@ -1150,7 +1142,7 @@ class ModeSelector(QDialog):
                 QMessageBox.information(
                     self,
                     "Configuration Loaded",
-                    f"Professional MQTT configuration loaded from:\n{file_path}"
+                    f"Advanced MQTT configuration loaded from:\n{file_path}"
                 )
 
             except Exception as e:
@@ -1570,10 +1562,14 @@ class ModeSelector(QDialog):
         # Emit signal with new mode and settings
         self.mode_changed.emit(selected_mode, connection_settings, "both")
 
-        # Emit professional MQTT configuration if enabled
-        if self.use_professional_mqtt:
+        # Always emit advanced MQTT configuration for hardware mode
+        if selected_mode == "hardware":
+            self.use_professional_mqtt = True
             professional_config = self.get_professional_mqtt_config()
             self.professional_mqtt_config_changed.emit(professional_config)
+
+            # Try to reconnect to MQTT messages after configuration
+            self.connect_mqtt_messages()
 
         # Store the current mode
         self.current_mode = selected_mode
@@ -1737,14 +1733,26 @@ class ModeSelector(QDialog):
         try:
             if self.main_window and hasattr(self.main_window, 'system_mode'):
                 system_mode = self.main_window.system_mode
-                if hasattr(system_mode, 'mqtt_client') and system_mode.mqtt_client:
-                    # Connect to MQTT message received signal
-                    system_mode.mqtt_client.message_received.connect(self.handle_mqtt_message)
-                    print("✓ Connected mode selector to MQTT messages")
-                else:
-                    print("⚠ No MQTT client available in system_mode")
+
+                # Try to connect to professional MQTT client first
+                if hasattr(system_mode, 'professional_mqtt_client') and system_mode.professional_mqtt_client:
+                    system_mode.professional_mqtt_client.message_received.connect(self.handle_mqtt_message)
+                    print("✓ Connected mode selector to professional MQTT messages")
+                    return
+
+                # Fallback to hardware controller MQTT client
+                if hasattr(system_mode, 'hardware_controller') and hasattr(system_mode.hardware_controller,
+                                                                           'mqtt_client'):
+                    if system_mode.hardware_controller.mqtt_client:
+                        system_mode.hardware_controller.mqtt_client.message_received.connect(self.handle_mqtt_message)
+                        print("✓ Connected mode selector to hardware controller MQTT messages")
+                        return
+
+                # No MQTT client available yet - this is normal when dialog opens before connection
+                print("ℹ MQTT client not yet initialized - will connect when hardware mode is activated")
             else:
-                print("⚠ No parent window or system_mode available")
+                # This is normal when dialog is opened standalone
+                pass
         except Exception as e:
             print(f"Error connecting to MQTT messages: {e}")
 
@@ -1760,4 +1768,3 @@ class ModeSelector(QDialog):
 
         except Exception as e:
             print(f"Error handling MQTT message: {e}")
-

@@ -1,16 +1,14 @@
-import os
-from typing import List, Dict, Optional
-import time
+from typing import Dict, Optional
 
 from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, 
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QFileDialog, QListWidget, QListWidgetItem, QProgressBar,
-    QSlider, QWidget, QMessageBox, QFrame, QSplitter, QStyle
+    QSlider, QWidget, QMessageBox, QSplitter
 )
-from PySide6.QtCore import Qt, QSize, QTimer, Signal, Slot, QUrl
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QIcon, QFont
 
-from controllers.music_manager import MusicManager
+from views.managers.music_manager import MusicManager
 
 
 class MusicListItem(QListWidgetItem):

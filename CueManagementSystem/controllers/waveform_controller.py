@@ -131,7 +131,7 @@ class WaveformControlsPanel(QWidget):
         self.mode_combo.addItem("Dual Layer", WaveformRenderMode.DUAL_LAYER)
         self.mode_combo.addItem("Frequency Bands", WaveformRenderMode.FREQUENCY_BANDS)
         self.mode_combo.addItem("Envelope Follower", WaveformRenderMode.ENVELOPE_FOLLOWER)
-        self.mode_combo.setCurrentIndex(1)  # Default to RMS Envelope
+        self.mode_combo.setCurrentIndex(4)  # Default to Frequency Bands
         self.mode_combo.setMinimumWidth(150)
         self.mode_combo.setMinimumHeight(30)
         mode_section.addWidget(self.mode_combo)
@@ -169,10 +169,10 @@ class WaveformControlsPanel(QWidget):
         smoothing_controls.setSpacing(8)
         self.smoothing_slider = QSlider(Qt.Horizontal)
         self.smoothing_slider.setRange(0, 100)
-        self.smoothing_slider.setValue(10)  # 0.1 default
+        self.smoothing_slider.setValue(0)  # 0.0 default
         self.smoothing_slider.setMinimumWidth(120)
         self.smoothing_slider.setMinimumHeight(20)
-        self.smoothing_value_label = QLabel("0.10")
+        self.smoothing_value_label = QLabel("0.00")
         self.smoothing_value_label.setMinimumWidth(35)
         self.smoothing_value_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #00ff80;")
         smoothing_controls.addWidget(self.smoothing_slider)
@@ -189,7 +189,7 @@ class WaveformControlsPanel(QWidget):
 
         self.range_spinbox = QSpinBox()
         self.range_spinbox.setRange(20, 120)
-        self.range_spinbox.setValue(60)
+        self.range_spinbox.setValue(40)
         self.range_spinbox.setSuffix(" dB")
         self.range_spinbox.setMinimumWidth(70)
         self.range_spinbox.setMinimumHeight(25)

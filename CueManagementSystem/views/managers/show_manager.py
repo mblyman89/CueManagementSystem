@@ -6,7 +6,7 @@ from typing import List
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from models.cue_model import Cue
-from models.database import CueDatabase
+from models.database_model import CueDatabase
 
 
 class ShowManager:

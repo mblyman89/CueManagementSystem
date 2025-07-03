@@ -1,4 +1,4 @@
-# models/database.py
+# models/database_model.py
 import sqlite3
 from typing import List, Dict, Any, Optional
 import os

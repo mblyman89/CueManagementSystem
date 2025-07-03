@@ -1,8 +1,8 @@
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QListWidget, QListWidgetItem, QMessageBox)
+                               QPushButton, QListWidget, QListWidgetItem)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
-from controllers.music_manager import MusicManager
+from views.managers.music_manager import MusicManager
 
 
 class MusicSelectionDialog(QDialog):

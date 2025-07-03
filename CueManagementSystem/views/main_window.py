@@ -1,27 +1,22 @@
 import asyncio
 import traceback
 
-from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                               QScrollArea, QSizePolicy, QPushButton, QMessageBox, QDialog, QApplication,
+                               QMessageBox, QDialog, QApplication,
                                QStatusBar)
-from PySide6.QtCore import Qt, QTimer, QMetaObject, Q_ARG, Slot
-from utils.color_utils import lighten_color, darken_color
+from PySide6.QtCore import Qt, QMetaObject, Q_ARG, Slot
 from views.table.cue_table import CueTableView
 from utils.data_utils import get_test_data
-from views.led_panel.led_panel_manager import LedPanelManager
-from views.dialogs.cue_creator import CueCreatorDialog
-from views.dialogs.cue_editor import CueEditorDialog
+from views.managers.led_panel_manager import LedPanelManager
+from views.dialogs.cue_creator_dialog import CueCreatorDialog
+from views.dialogs.cue_editor_dialog import CueEditorDialog
 from views.dialogs.music_file_dialog import MusicFileDialog
 from views.dialogs.generate_show_dialog import GeneratorPromptDialog
 from views.button_bar.button_bar import ButtonBar
 from views.dialogs.mode_selector_dialog import ModeSelector
-from controllers.system_mode import SystemMode
-from views.button_bar.button_mqtt_integration import ButtonMQTTIntegration
-from controllers.gpio_controller import GPIOController
-from controllers.show_execution_manager import ShowExecutionManager
-from controllers.music_manager import MusicManager
-from controllers.show_manager import ShowManager
+from controllers.system_mode_controller import SystemMode
+from views.managers.music_manager import MusicManager
+from views.managers.show_manager import ShowManager
 
 
 class MainWindow(QMainWindow):
@@ -52,7 +47,7 @@ class MainWindow(QMainWindow):
         self.load_test_data()
 
         # Initialize show preview controller after LED panel is created
-        from utils.show_preview_controller import ShowPreviewController
+        from controllers.show_preview_controller import ShowPreviewController
         self.preview_controller = ShowPreviewController(self.led_panel)
 
         # Connect preview controller signals
