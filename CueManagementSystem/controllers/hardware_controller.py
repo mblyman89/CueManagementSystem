@@ -1,11 +1,11 @@
 """
-Enhanced Hardware Controller for MQTT-based Firework Control
+Enhanced Hardware Controller for SSH-based Firework Control
 
 This module provides a comprehensive hardware controller that integrates
-MQTT communication with 74HC595 shift register control for firework shows.
+SSH communication with 74HC595 shift register control for firework shows.
 
 Features:
-- MQTT-based communication with Raspberry Pi
+- SSH-based communication with Raspberry Pi
 - 74HC595 shift register data formatting
 - Safety interlocks and emergency stop
 - Connection monitoring and diagnostics
@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import time
+import paramiko
 from dataclasses import dataclass
 from enum import Enum
 from typing import Dict, Any, Optional, Callable, List
@@ -25,7 +26,6 @@ from datetime import datetime
 
 from PySide6.QtCore import QObject, Signal, QTimer
 
-from hardware.mqtt_client import MQTTClient, ConnectionConfig, ConnectionState, MessagePriority
 from hardware.shift_register_formatter import ShiftRegisterFormatter, ShiftRegisterConfig, ShiftRegisterPacket
 
 
@@ -64,12 +64,27 @@ class HardwareStatus:
             self.active_outputs = []
 
 
+@dataclass
+class ConnectionConfig:
+    """SSH connection configuration"""
+    host: str
+    port: int
+    username: str
+    password: str
+    client_id: str = None
+    use_ssl: bool = False
+    base_path: str = "/home/pi/fireworks"
+    command_script: str = "execute_command.py"
+    status_script: str = "get_status.py"
+    emergency_script: str = "emergency_stop.py"
+
+
 class HardwareController(QObject):
     """
-    Enhanced hardware controller for MQTT-based firework control
+    Enhanced hardware controller for SSH-based firework control
 
     This controller manages communication between the PySide6 application
-    and the Raspberry Pi hardware via MQTT, handling:
+    and the Raspberry Pi hardware via SSH, handling:
     - Cue execution commands
     - Emergency stop functionality
     - Hardware status monitoring
@@ -90,9 +105,9 @@ class HardwareController(QObject):
         self.system_mode = system_mode_controller
         self.logger = self._setup_logging()
 
-        # MQTT client and configuration
-        self.mqtt_client: Optional[MQTTClient] = None
-        self.mqtt_config: Optional[ConnectionConfig] = None
+        # SSH client and configuration
+        self.ssh_client: Optional[paramiko.SSHClient] = None
+        self.ssh_config: Optional[ConnectionConfig] = None
 
         # Shift register formatter
         self.shift_formatter: Optional[ShiftRegisterFormatter] = None
@@ -132,27 +147,25 @@ class HardwareController(QObject):
 
     def set_connection_params(self, host: str, port: int, username: str = None, password: str = None):
         """
-        Set MQTT connection parameters
+        Set SSH connection parameters
 
         Args:
-            host: MQTT broker hostname/IP
-            port: MQTT broker port
-            username: Optional username
-            password: Optional password
+            host: SSH hostname/IP
+            port: SSH port
+            username: SSH username
+            password: SSH password
         """
-        self.mqtt_config = ConnectionConfig(
+        self.ssh_config = ConnectionConfig(
             host=host,
             port=port,
             username=username,
             password=password,
             client_id=f"fireworks_hardware_{int(time.time())}",
             use_ssl=False,  # Default to False, can be enabled when needed
-            clean_session=False,  # Use persistent sessions
-            base_topic="fireworks/hardware",
-            command_topic="commands",
-            status_topic="status",
-            emergency_topic="emergency",
-            heartbeat_topic="heartbeat"
+            base_path="/home/pi/fireworks",
+            command_script="execute_command.py",
+            status_script="get_status.py",
+            emergency_script="emergency_stop.py"
         )
 
         # Initialize shift register formatter for 1000 outputs (5 chains × 25 registers)
@@ -170,7 +183,7 @@ class HardwareController(QObject):
                 outputs_per_chain=200,  # 25 × 8 = 200 outputs per chain
                 use_output_enable=True,
                 use_serial_clear=True,
-                output_enable_pins=[5, 6, 7, 8, 12],     # GPIO pins for OE (HIGH=disabled, LOW=enabled)
+                output_enable_pins=[5, 6, 7, 8, 12],  # GPIO pins for OE (HIGH=disabled, LOW=enabled)
                 serial_clear_pins=[13, 16, 19, 20, 26],  # GPIO pins for SRCLR (LOW=disabled, HIGH=enabled)
                 arm_pin=21  # Single arm control pin (LOW=disarmed, HIGH=armed)
             )
@@ -193,12 +206,12 @@ class HardwareController(QObject):
 
     def connect(self) -> bool:
         """
-        Connect to hardware via MQTT
+        Connect to hardware via SSH
 
         Returns:
             bool: True if connection initiated successfully
         """
-        if not self.mqtt_config:
+        if not self.ssh_config:
             self.logger.error("No connection parameters set")
             return False
 
@@ -209,22 +222,30 @@ class HardwareController(QObject):
         try:
             self._set_hardware_state(HardwareState.CONNECTING)
 
-            # Create MQTT client
-            self.mqtt_client = MQTTClient(self.mqtt_config)
+            # Create SSH client
+            self.ssh_client = paramiko.SSHClient()
+            self.ssh_client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-            # Connect signals
-            self.mqtt_client.connection_state_changed.connect(self._on_mqtt_state_changed)
-            self.mqtt_client.message_received.connect(self._on_mqtt_message_received)
-            self.mqtt_client.error_occurred.connect(self._on_mqtt_error)
+            # Connect to SSH server
+            self.ssh_client.connect(
+                hostname=self.ssh_config.host,
+                port=self.ssh_config.port,
+                username=self.ssh_config.username,
+                password=self.ssh_config.password,
+                timeout=10
+            )
 
-            # Start connection
-            success = self.mqtt_client.connect()
+            # Test connection with a simple command
+            stdin, stdout, stderr = self.ssh_client.exec_command("echo 'SSH connection test'")
+            output = stdout.read().decode().strip()
 
-            if success:
-                self.logger.info("Hardware connection initiated")
+            if output == "SSH connection test":
+                self._set_hardware_state(HardwareState.CONNECTED)
+                self.logger.info("Hardware connection established")
                 return True
             else:
                 self._set_hardware_state(HardwareState.ERROR)
+                self.logger.error(f"SSH connection test failed: {stderr.read().decode().strip()}")
                 return False
 
         except Exception as e:
@@ -235,9 +256,9 @@ class HardwareController(QObject):
 
     def disconnect(self):
         """Disconnect from hardware"""
-        if self.mqtt_client:
-            self.mqtt_client.disconnect()
-            self.mqtt_client = None
+        if self.ssh_client:
+            self.ssh_client.close()
+            self.ssh_client = None
 
         self._stop_monitoring()
         self._set_hardware_state(HardwareState.DISCONNECTED)
@@ -268,35 +289,41 @@ class HardwareController(QObject):
             packet = self.shift_formatter.format_cue(cue_data)
 
             # Create command
+            command_id = packet.packet_id
             command = {
                 'type': CommandType.CUE_EXECUTE.value,
                 'packet': packet.to_dict(),
                 'cue_data': cue_data,
                 'timestamp': datetime.now().isoformat(),
-                'command_id': packet.packet_id
+                'command_id': command_id
             }
 
-            # Send via MQTT
-            topic = f"{self.mqtt_config.base_topic}/{self.mqtt_config.command_topic}"
-            success = self.mqtt_client.publish(
-                topic=topic,
-                payload=command,
-                qos=2,  # QoS 2 for critical commands
-                priority=MessagePriority.HIGH
-            )
+            # Execute command via SSH
+            command_json = json.dumps(command)
+            ssh_command = f"python3 {self.ssh_config.base_path}/{self.ssh_config.command_script} '{command_json}'"
 
-            if success:
+            stdin, stdout, stderr = self.ssh_client.exec_command(ssh_command)
+            exit_status = stdout.channel.recv_exit_status()
+
+            if exit_status == 0:
+                response = stdout.read().decode().strip()
+                response_data = json.loads(response)
+                success = response_data.get('success', False)
+                message = response_data.get('message', '')
+
                 # Track pending command
-                self._pending_commands[packet.packet_id] = {
+                self._pending_commands[command_id] = {
                     'command': command,
                     'timestamp': time.time(),
                     'cue_number': cue_data.get('cue_number', 'unknown')
                 }
 
                 self.logger.info(f"Cue command sent: {cue_data.get('cue_number', 'unknown')}")
-                return True, "Command sent successfully"
+                return success, message
             else:
-                return False, "Failed to send command"
+                error = stderr.read().decode().strip()
+                self.logger.error(f"SSH command failed: {error}")
+                return False, f"SSH command failed: {error}"
 
         except Exception as e:
             self.logger.error(f"Failed to send cue: {e}")
@@ -326,25 +353,19 @@ class HardwareController(QObject):
                 'command_id': command_id
             }
 
-            # Determine QoS and priority based on command type
-            qos = 2
-            priority = MessagePriority.NORMAL
+            # Execute command via SSH
+            command_json = json.dumps(command)
+            ssh_command = f"python3 {self.ssh_config.base_path}/{self.ssh_config.command_script} '{command_json}'"
 
-            if command_type == CommandType.EMERGENCY_STOP.value:
-                priority = MessagePriority.CRITICAL
-            elif command_type in [CommandType.CUE_EXECUTE.value, CommandType.RESET.value]:
-                priority = MessagePriority.HIGH
+            stdin, stdout, stderr = self.ssh_client.exec_command(ssh_command)
+            exit_status = stdout.channel.recv_exit_status()
 
-            # Send command
-            topic = f"{self.mqtt_config.base_topic}/{self.mqtt_config.command_topic}"
-            success = self.mqtt_client.publish(
-                topic=topic,
-                payload=command,
-                qos=qos,
-                priority=priority
-            )
+            if exit_status == 0:
+                response = stdout.read().decode().strip()
+                response_data = json.loads(response)
+                success = response_data.get('success', False)
+                message = response_data.get('message', '')
 
-            if success:
                 # Track pending command
                 self._pending_commands[command_id] = {
                     'command': command,
@@ -353,9 +374,11 @@ class HardwareController(QObject):
                 }
 
                 self.logger.info(f"Command sent: {command_type}")
-                return True, "Command sent successfully"
+                return success, message
             else:
-                return False, "Failed to send command"
+                error = stderr.read().decode().strip()
+                self.logger.error(f"SSH command failed: {error}")
+                return False, f"SSH command failed: {error}"
 
         except Exception as e:
             self.logger.error(f"Failed to send command: {e}")
@@ -375,12 +398,21 @@ class HardwareController(QObject):
         self._emergency_stop_active = True
         self._set_hardware_state(HardwareState.EMERGENCY_STOP)
 
-        # Send emergency stop via MQTT
-        if self.mqtt_client:
-            success = self.mqtt_client.emergency_stop()
-            if success:
-                self.emergency_stop_activated.emit(reason)
-                return True
+        # Send emergency stop via SSH
+        if self.ssh_client:
+            try:
+                ssh_command = f"python3 {self.ssh_config.base_path}/{self.ssh_config.emergency_script} '{reason}'"
+                stdin, stdout, stderr = self.ssh_client.exec_command(ssh_command)
+                exit_status = stdout.channel.recv_exit_status()
+
+                if exit_status == 0:
+                    self.emergency_stop_activated.emit(reason)
+                    return True
+                else:
+                    error = stderr.read().decode().strip()
+                    self.logger.error(f"Emergency stop command failed: {error}")
+            except Exception as e:
+                self.logger.error(f"Failed to send emergency stop: {e}")
 
         # Also try to send via hardware controller
         asyncio.create_task(self.send_command(
@@ -494,10 +526,23 @@ class HardwareController(QObject):
     def _request_hardware_status(self):
         """Request hardware status from Raspberry Pi"""
         if self.is_hardware_connected():
-            asyncio.create_task(self.send_command(
-                CommandType.STATUS_REQUEST.value,
-                {'timestamp': datetime.now().isoformat()}
-            ))
+            try:
+                ssh_command = f"python3 {self.ssh_config.base_path}/{self.ssh_config.status_script}"
+                stdin, stdout, stderr = self.ssh_client.exec_command(ssh_command)
+                exit_status = stdout.channel.recv_exit_status()
+
+                if exit_status == 0:
+                    response = stdout.read().decode().strip()
+                    try:
+                        status_data = json.loads(response)
+                        self._handle_status_message(status_data)
+                    except json.JSONDecodeError:
+                        self.logger.error(f"Invalid JSON in status response: {response}")
+                else:
+                    error = stderr.read().decode().strip()
+                    self.logger.error(f"Status request failed: {error}")
+            except Exception as e:
+                self.logger.error(f"Failed to request status: {e}")
 
     def _check_command_timeouts(self):
         """Check for timed out commands"""
@@ -519,44 +564,6 @@ class HardwareController(QObject):
             # If it was a critical command, consider it an error
             if command_type in [CommandType.CUE_EXECUTE.value, CommandType.EMERGENCY_STOP.value]:
                 self.error_occurred.emit("COMMAND_TIMEOUT", f"Critical command timed out: {command_type}")
-
-    # MQTT Event Handlers
-    def _on_mqtt_state_changed(self, mqtt_state: ConnectionState):
-        """Handle MQTT connection state changes"""
-        if mqtt_state == ConnectionState.CONNECTED:
-            self._set_hardware_state(HardwareState.CONNECTED)
-        elif mqtt_state == ConnectionState.DISCONNECTED:
-            self._set_hardware_state(HardwareState.DISCONNECTED)
-        elif mqtt_state in [ConnectionState.ERROR, ConnectionState.RECONNECTING]:
-            if self._hardware_state != HardwareState.EMERGENCY_STOP:
-                self._set_hardware_state(HardwareState.ERROR)
-
-    def _on_mqtt_message_received(self, topic: str, payload: bytes):
-        """Handle received MQTT messages"""
-        try:
-            # Decode message
-            message_str = payload.decode('utf-8')
-            message_data = json.loads(message_str)
-
-            # Handle different message types
-            if topic.endswith('/status'):
-                self._handle_status_message(message_data)
-            elif topic.endswith('/response'):
-                self._handle_response_message(message_data)
-            elif topic.endswith('/error'):
-                self._handle_error_message(message_data)
-            elif topic.endswith('/heartbeat'):
-                self._handle_heartbeat_message(message_data)
-            else:
-                self.logger.debug(f"Unhandled message topic: {topic}")
-
-        except Exception as e:
-            self.logger.error(f"Error processing MQTT message: {e}")
-
-    def _on_mqtt_error(self, error_message: str):
-        """Handle MQTT errors"""
-        self.logger.error(f"MQTT error: {error_message}")
-        self.error_occurred.emit("MQTT_ERROR", error_message)
 
     def _handle_status_message(self, message_data: Dict[str, Any]):
         """Handle hardware status messages"""
@@ -582,51 +589,6 @@ class HardwareController(QObject):
         except Exception as e:
             self.logger.error(f"Error processing status message: {e}")
 
-    def _handle_response_message(self, message_data: Dict[str, Any]):
-        """Handle command response messages"""
-        try:
-            command_id = message_data.get('command_id')
-            success = message_data.get('success', False)
-            message = message_data.get('message', '')
-
-            if command_id in self._pending_commands:
-                # Remove from pending commands
-                command_info = self._pending_commands.pop(command_id)
-
-                # Emit acknowledgment signal
-                self.command_acknowledged.emit(command_id, success, message)
-
-                if success:
-                    self.logger.info(f"Command acknowledged: {command_id}")
-                else:
-                    self.logger.warning(f"Command failed: {command_id} - {message}")
-            else:
-                self.logger.warning(f"Received response for unknown command: {command_id}")
-
-        except Exception as e:
-            self.logger.error(f"Error processing response message: {e}")
-
-    def _handle_error_message(self, message_data: Dict[str, Any]):
-        """Handle hardware error messages"""
-        try:
-            error_type = message_data.get('error_type', 'UNKNOWN')
-            error_message = message_data.get('message', 'Unknown error')
-
-            self.logger.error(f"Hardware error: {error_type} - {error_message}")
-            self.error_occurred.emit(error_type, error_message)
-
-            # Handle critical errors
-            if error_type in ['EMERGENCY_STOP', 'SAFETY_VIOLATION', 'HARDWARE_FAULT']:
-                self.emergency_stop(f"Hardware error: {error_message}")
-
-        except Exception as e:
-            self.logger.error(f"Error processing error message: {e}")
-
-    def _handle_heartbeat_message(self, message_data: Dict[str, Any]):
-        """Handle heartbeat messages from hardware"""
-        self._last_heartbeat = datetime.now()
-        self.logger.debug("Heartbeat received from hardware")
-
     def get_hardware_status(self) -> HardwareStatus:
         """Get current hardware status"""
         return self._last_status
@@ -648,18 +610,12 @@ class HardwareController(QObject):
             'last_heartbeat': self._last_heartbeat.isoformat() if self._last_heartbeat else None
         }
 
-        if self.mqtt_config:
+        if self.ssh_config:
             info.update({
-                'host': self.mqtt_config.host,
-                'port': self.mqtt_config.port,
-                'client_id': self.mqtt_config.client_id,
-                'use_ssl': self.mqtt_config.use_ssl
-            })
-
-        if self.mqtt_client:
-            info.update({
-                'mqtt_state': self.mqtt_client.state.value,
-                'mqtt_statistics': self.mqtt_client.statistics
+                'host': self.ssh_config.host,
+                'port': self.ssh_config.port,
+                'client_id': self.ssh_config.client_id,
+                'use_ssl': self.ssh_config.use_ssl
             })
 
         return info

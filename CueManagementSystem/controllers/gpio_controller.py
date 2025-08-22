@@ -37,7 +37,7 @@ class SystemState(Enum):
 class GPIOConfig:
     """GPIO pin configuration for the system"""
     # Output Enable pins (5 chains) - HIGH when disabled, LOW when enabled
-    output_enable_pins: List[int] = None  # Will be set to [5, 6, 7, 8, 12]
+    output_enable_pins: List[int] = None  # Will be set to [2, 3, 4, 5, 6]
     output_enable_active_high: List[bool] = None  # [False, False, False, False, False] (LOW = enabled)
 
     # Serial Clear pins (5 chains) - LOW when disabled, HIGH when enabled
@@ -45,7 +45,7 @@ class GPIOConfig:
     serial_clear_active_high: List[bool] = None  # [True, True, True, True, True] (HIGH = enabled)
 
     # Shift register control pins (5 chains of 25 registers each)
-    data_pins: List[int] = None  # Will be set to [2, 3, 4, 14, 15] - Data pins for each chain
+    data_pins: List[int] = None  # Will be set to [7, 8, 12, 14, 15] - Data pins for each chain
     sclk_pins: List[int] = None  # Will be set to [17, 18, 22, 23, 27] - Serial clock pins
     rclk_pins: List[int] = None  # Will be set to [9, 10, 11, 24, 25] - Register clock (latch) pins
 
@@ -60,7 +60,7 @@ class GPIOConfig:
     def __post_init__(self):
         """Initialize default values"""
         if self.output_enable_pins is None:
-            self.output_enable_pins = [5, 6, 7, 8, 12]
+            self.output_enable_pins = [2, 3, 4, 5, 6]
         if self.output_enable_active_high is None:
             self.output_enable_active_high = [False, False, False, False, False]
         if self.serial_clear_pins is None:
@@ -68,7 +68,7 @@ class GPIOConfig:
         if self.serial_clear_active_high is None:
             self.serial_clear_active_high = [True, True, True, True, True]
         if self.data_pins is None:
-            self.data_pins = [2, 3, 4, 14, 15]
+            self.data_pins = [7, 8, 12, 14, 15]
         if self.sclk_pins is None:
             self.sclk_pins = [17, 18, 22, 23, 27]
         if self.rclk_pins is None:

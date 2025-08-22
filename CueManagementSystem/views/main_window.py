@@ -34,11 +34,9 @@ class MainWindow(QMainWindow):
         self.system_mode = SystemMode()
         self.music_manager = MusicManager()
 
-        # Get references to MQTT integration components from system_mode
+        # Get references to hardware components from system_mode
         self.gpio_controller = self.system_mode.gpio_controller
         self.show_execution_manager = self.system_mode.show_execution_manager
-
-        # Note: ButtonMQTTIntegration will be initialized after button_bar is created
 
         # Initialize UI components
         self.init_ui()
@@ -54,8 +52,8 @@ class MainWindow(QMainWindow):
         self.preview_controller.preview_started.connect(self.handle_preview_started)
         self.preview_controller.preview_ended.connect(self.handle_preview_ended)
 
-        # Connect MQTT integration signals
-        self.connect_mqtt_signals()
+        # Connect SSH connection signals
+        self.connect_ssh_signals()
 
         # Initialize button text based on current mode
         self.update_mode_buttons_text()
@@ -119,24 +117,6 @@ class MainWindow(QMainWindow):
         # Store a reference to the buttons dictionary for easy access
         self.buttons = button_bar.buttons
 
-        # Initialize ButtonMQTTIntegration only if all components are available
-        try:
-            # Only create MQTT integration if we have all required components
-            if hasattr(self, 'system_mode') and hasattr(self, 'gpio_controller'):
-                from views.button_bar.button_mqtt_integration import ButtonMQTTIntegration
-                self.button_mqtt_integration = ButtonMQTTIntegration(
-                    button_bar=button_bar,
-                    system_mode=self.system_mode,
-                    main_window=self
-                )
-                print("✓ MQTT integration initialized")
-            else:
-                self.button_mqtt_integration = None
-                print("ℹ MQTT integration not available - using simulation mode only")
-        except Exception as e:
-            print(f"Warning: Could not initialize MQTT integration: {e}")
-            self.button_mqtt_integration = None
-
         # Connect button signals to actions
         self.connect_button_signals(button_bar)
 
@@ -152,18 +132,12 @@ class MainWindow(QMainWindow):
         button_bar.pause_clicked.connect(self.handle_pause_button)
         button_bar.resume_clicked.connect(self.handle_resume_button)
 
-        # Connect MQTT control buttons (only if MQTT integration exists)
-        # Note: enable_outputs and arm_outputs are handled by button_mqtt_integration.py
-        # to avoid duplicate signal connections
-        try:
-            if hasattr(button_bar, 'execute_cue_clicked'):
-                button_bar.execute_cue_clicked.connect(self.handle_execute_cue_button)
+        # Connect hardware control buttons
+        button_bar.enable_outputs.connect(self.handle_enable_outputs_button)
+        button_bar.arm_outputs.connect(self.handle_arm_outputs_button)
 
-            # Note: execute_all_clicked is handled by handle_execute_all_button above
-            # which works in both simulation and hardware modes
-
-        except Exception as e:
-            print(f"Warning: Could not connect MQTT buttons: {e}")
+        if hasattr(button_bar, 'execute_cue_clicked'):
+            button_bar.execute_cue_clicked.connect(self.handle_execute_cue_button)
 
         # Connect editing buttons
         button_bar.create_cue_clicked.connect(self.show_cue_creator)
@@ -187,24 +161,20 @@ class MainWindow(QMainWindow):
         button_bar.export_show_clicked.connect(self.show_manager.export_show)
 
     # Mode-aware button routing methods
+    # These methods check the current system mode and route button actions accordingly
+    # In simulation mode: Actions control the preview functionality
+    # In hardware mode: Actions are sent to the hardware via SSH
     def handle_execute_all_button(self):
         """Execute show button - works in both simulation and hardware modes"""
         try:
             # ALWAYS show the preview on LED panel (simulation functionality)
             self.preview_show()
 
-            # ALSO send MQTT commands if in hardware mode
+            # ALSO send SSH commands if in hardware mode
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
             if current_mode != 'simulation':
-                # In hardware mode: Also execute via MQTT
-                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
-                    # Execute show via MQTT (sequential cue execution)
-                    self.execute_show_via_mqtt()
-                elif hasattr(self.system_mode, 'handle_execute_show_button'):
-                    # Direct system mode execution
-                    self.execute_show_via_system_mode()
-                else:
-                    print("Hardware execution not available - preview only")
+                # In hardware mode: Also execute via SSH
+                self.execute_show_via_system_mode()
             else:
                 print("Simulation mode: Preview only")
 
@@ -222,14 +192,22 @@ class MainWindow(QMainWindow):
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
             if current_mode == 'simulation':
                 # In simulation mode: Stop preview
-                self.stop_preview()
-            else:
-                # In hardware mode: Abort execution
-                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
-                    self.button_mqtt_integration.handle_abort()
-                else:
-                    # Fallback to stop preview
+                # Check if preview is active before attempting to stop
+                preview_active = False
+                if hasattr(self.preview_controller, 'is_playing'):
+                    preview_active = preview_active or self.preview_controller.is_playing
+                if hasattr(self.preview_controller, 'is_paused'):
+                    preview_active = preview_active or self.preview_controller.is_paused
+
+                if preview_active:
                     self.stop_preview()
+                else:
+                    print("No preview is currently active")
+            else:
+                # In hardware mode: Abort execution via system_mode
+                self.system_mode.handle_abort_button()
+                # Also stop preview
+                self.stop_preview()
         except Exception as e:
             print(f"Stop button error: {e}")
             # Fallback to simulation mode behavior
@@ -241,14 +219,16 @@ class MainWindow(QMainWindow):
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
             if current_mode == 'simulation':
                 # In simulation mode: Pause preview
-                self.pause_preview()
-            else:
-                # In hardware mode: Pause execution
-                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
-                    self.button_mqtt_integration.handle_pause()
-                else:
-                    # Fallback to pause preview
+                # Check if preview is active before attempting to pause
+                if hasattr(self.preview_controller, 'is_playing') and self.preview_controller.is_playing:
                     self.pause_preview()
+                else:
+                    print("No preview is currently playing")
+            else:
+                # In hardware mode: Pause execution via system_mode
+                self.system_mode.handle_pause_button()
+                # Also pause preview
+                self.pause_preview()
         except Exception as e:
             print(f"Pause button error: {e}")
             # Fallback to simulation mode behavior
@@ -260,14 +240,16 @@ class MainWindow(QMainWindow):
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
             if current_mode == 'simulation':
                 # In simulation mode: Resume preview
-                self.resume_preview()
-            else:
-                # In hardware mode: Resume execution
-                if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
-                    self.button_mqtt_integration.handle_resume()
-                else:
-                    # Fallback to resume preview
+                # Check if preview is paused before attempting to resume
+                if hasattr(self.preview_controller, 'is_paused') and self.preview_controller.is_paused:
                     self.resume_preview()
+                else:
+                    print("No paused preview to resume")
+            else:
+                # In hardware mode: Resume execution via system_mode
+                self.system_mode.handle_resume_button()
+                # Also resume preview
+                self.resume_preview()
         except Exception as e:
             print(f"Resume button error: {e}")
             # Fallback to simulation mode behavior
@@ -357,26 +339,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Execute cue error: {e}")
 
-    def execute_show_via_mqtt(self):
-        """Execute complete show via MQTT (sequential cue execution)"""
-        try:
-            # Get all cues from the table
-            show_cues = self.get_all_cues_for_execution()
-
-            if show_cues:
-                print(f"Executing show via MQTT: {len(show_cues)} cues")
-                # Execute via MQTT integration
-                if hasattr(self.button_mqtt_integration, 'handle_execute_show'):
-                    self.button_mqtt_integration.handle_execute_show(show_cues)
-                else:
-                    # Fallback to system mode
-                    asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues))
-            else:
-                print("No cues available for execution")
-
-        except Exception as e:
-            print(f"MQTT show execution error: {e}")
-
     def execute_show_via_system_mode(self):
         """Execute complete show via system mode directly"""
         try:
@@ -422,25 +384,16 @@ class MainWindow(QMainWindow):
             print(f"Error getting cues for execution: {e}")
             return []
 
-    def connect_mqtt_signals(self):
-        """Connect MQTT integration signals to UI updates"""
+    def connect_ssh_signals(self):
+        """Connect SSH connection signals to UI updates"""
         try:
             # Connect system mode signals
             if hasattr(self.system_mode, 'connection_status_changed'):
                 self.system_mode.connection_status_changed.connect(self.update_connection_status)
             if hasattr(self.system_mode, 'error_occurred'):
-                self.system_mode.error_occurred.connect(self.handle_mqtt_error)
+                self.system_mode.error_occurred.connect(self.handle_ssh_error)
             if hasattr(self.system_mode, 'hardware_status_updated'):
                 self.system_mode.hardware_status_updated.connect(self.update_hardware_status)
-
-            # Connect button integration signals (only if button_mqtt_integration exists)
-            if hasattr(self, 'button_mqtt_integration') and self.button_mqtt_integration:
-                if hasattr(self.button_mqtt_integration, 'button_state_changed'):
-                    self.button_mqtt_integration.button_state_changed.connect(self.update_button_state)
-                if hasattr(self.button_mqtt_integration, 'execution_status_changed'):
-                    self.button_mqtt_integration.execution_status_changed.connect(self.update_execution_status)
-                if hasattr(self.button_mqtt_integration, 'show_progress_updated'):
-                    self.button_mqtt_integration.show_progress_updated.connect(self.update_show_progress)
 
             # Connect show execution manager signals (use correct signal names)
             if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
@@ -461,21 +414,21 @@ class MainWindow(QMainWindow):
                     self.gpio_controller.error_occurred.connect(self.handle_gpio_error)
 
         except Exception as e:
-            print(f"Warning: Could not connect all MQTT signals: {e}")
-            # Continue without MQTT signals - maintain existing functionality
+            print(f"Warning: Could not connect all SSH signals: {e}")
+            # Continue without SSH signals - maintain existing functionality
 
     def update_connection_status(self, connected: bool, status_message: str):
-        """Update UI based on MQTT connection status"""
+        """Update UI based on SSH connection status"""
         if connected:
-            self.statusBar().showMessage(f"MQTT Connected: {status_message}")
+            self.statusBar().showMessage(f"SSH Connected: {status_message}")
             self.statusBar().setStyleSheet("background-color: #2ecc71; color: white;")
         else:
-            self.statusBar().showMessage(f"MQTT Disconnected: {status_message}")
+            self.statusBar().showMessage(f"SSH Disconnected: {status_message}")
             self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
 
-    def handle_mqtt_error(self, error_message: str):
-        """Handle MQTT errors"""
-        self.statusBar().showMessage(f"MQTT Error: {error_message}")
+    def handle_ssh_error(self, error_message: str):
+        """Handle SSH errors"""
+        self.statusBar().showMessage(f"SSH Error: {error_message}")
         self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
 
     def update_hardware_status(self, status_data: dict):
@@ -896,24 +849,11 @@ class MainWindow(QMainWindow):
             # Connect mode changed signal
             dialog.mode_changed.connect(self.queue_mode_change)
 
-            # Connect professional MQTT config changes
-            if hasattr(dialog, 'professional_mqtt_config_changed'):
-                dialog.professional_mqtt_config_changed.connect(self.handle_professional_mqtt_config)
-
             # Show dialog
             result = dialog.exec()
 
             if result == QDialog.Accepted:
                 print("Mode selector dialog accepted")
-
-                # Handle professional MQTT configuration if available
-                if hasattr(dialog, 'professional_mqtt_config'):
-                    try:
-                        self.system_mode.configure_professional_mqtt(dialog.professional_mqtt_config)
-                        self.statusBar().showMessage("Professional MQTT configuration updated")
-                    except Exception as e:
-                        self.statusBar().showMessage(f"MQTT Config Error: {str(e)}")
-                        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
             else:
                 print("Mode selector dialog cancelled")
 
@@ -921,23 +861,14 @@ class MainWindow(QMainWindow):
             # Always reset the flag when dialog is closed
             self._mode_dialog_open = False
 
-    def handle_professional_mqtt_config(self, config: dict):
-        """Handle professional MQTT configuration changes"""
-        try:
-            self.system_mode.configure_professional_mqtt(config)
-            self.statusBar().showMessage("Professional MQTT configuration updated")
-        except Exception as e:
-            self.statusBar().showMessage(f"MQTT Config Error: {str(e)}")
-            self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
-
-    def queue_mode_change(self, mode, connection_settings, communication_method="mqtt"):
+    def queue_mode_change(self, mode, connection_settings, communication_method="ssh"):
         """Queue the mode change operation"""
         print(f"Queueing mode change to: {mode}")
         print(f"Connection settings: {connection_settings}")
         print(f"Communication method: {communication_method}")
         asyncio.create_task(self._safe_mode_change(mode, connection_settings, communication_method))
 
-    async def _safe_mode_change(self, mode, connection_settings, communication_method="mqtt"):
+    async def _safe_mode_change(self, mode, connection_settings, communication_method="ssh"):
         """Safely handle mode changes with proper error handling"""
         try:
             print(f"Starting mode change to: {mode}")
@@ -1343,6 +1274,7 @@ class MainWindow(QMainWindow):
 
             if not preview_active:
                 print("Cannot stop: no preview is active")
+                # Don't show error message in simulation mode
                 return
 
             # Stop the preview
@@ -1374,6 +1306,7 @@ class MainWindow(QMainWindow):
 
             if not preview_playing:
                 print("Cannot pause: preview is not active")
+                # Don't show error message in simulation mode
                 return
 
             # Pause the preview
@@ -1406,6 +1339,7 @@ class MainWindow(QMainWindow):
 
             if not preview_paused:
                 print("Cannot resume: preview is not paused")
+                # Don't show error message in simulation mode
                 return
 
             # Resume the preview
@@ -1482,9 +1416,6 @@ class MainWindow(QMainWindow):
             if self.system_mode:
                 self.system_mode.close_connection_sync()
 
-            # Cleanup MQTT integration components
-            self.cleanup_mqtt_integration()
-
             print("Cleanup completed successfully")
             super().closeEvent(event)
         except Exception as e:
@@ -1496,28 +1427,5 @@ class MainWindow(QMainWindow):
         try:
             if self.system_mode:
                 await self.system_mode.close_connection()
-
-            # Cleanup MQTT integration components
-            self.cleanup_mqtt_integration()
         except Exception as e:
             print(f"Error in cleanup: {e}")
-
-    def cleanup_mqtt_integration(self):
-        """Cleanup MQTT integration components"""
-        try:
-            # Disconnect MQTT
-            if hasattr(self.system_mode, 'disconnect_professional_mqtt'):
-                self.system_mode.disconnect_professional_mqtt()
-
-            # Cleanup GPIO
-            if hasattr(self.gpio_controller, 'cleanup'):
-                self.gpio_controller.cleanup()
-
-            # Stop show execution
-            if hasattr(self.show_execution_manager, 'stop_execution'):
-                self.show_execution_manager.stop_execution()
-
-            print("MQTT integration cleaned up successfully")
-        except Exception as e:
-            print(f"Error during MQTT cleanup: {e}")
-

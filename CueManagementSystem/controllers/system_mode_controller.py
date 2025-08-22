@@ -1,15 +1,15 @@
 import logging
 import json
+import time
 from typing import Optional, Dict, Any, List
 from PySide6.QtCore import QObject, Signal, QTimer
 from controllers.hardware_controller import HardwareController
-from hardware.mqtt_client import MQTTClient
 from hardware.shift_register_formatter import ShiftRegisterFormatter, ShiftRegisterConfig
 
 
 class SystemMode(QObject):
     """
-    Controller for managing system operation mode with support for SSH, MQTT, and Professional MQTT
+    Controller for managing system operation mode with support for SSH
     """
 
     # Signals for UI updates
@@ -24,20 +24,16 @@ class SystemMode(QObject):
         self.logger = logging.getLogger(__name__)
 
         self.current_mode = "simulation"
-        self.communication_method = "mqtt"  # Default to MQTT for Raspberry Pi communication
+        self.communication_method = "ssh"  # Default to SSH for Raspberry Pi communication
         self.connection_settings = {
             "host": "raspberrypi.local",
-            "port": 22,  # SSH port (will be overridden for MQTT)
+            "port": 22,  # SSH port
             "username": "pi",
             "password": "",
-            "known_hosts": None,
-            "mqtt_port": 1883  # Default MQTT port
+            "known_hosts": None
         }
         self.ssh_connection = None
         self.hardware_controller = HardwareController(self)
-
-        # Professional MQTT components
-        self.professional_mqtt_client: Optional[MQTTClient] = None
 
         # Create shift register configuration for large-scale system (1000 outputs)
         # Configure for 5 chains of 25 registers each = 125 total registers = 1000 outputs
@@ -84,7 +80,6 @@ class SystemMode(QObject):
                 print("✅ Modified default config for 1000 outputs")
 
         self.shift_register_formatter = ShiftRegisterFormatter(default_shift_config)
-        self.use_professional_mqtt = False  # Flag to enable professional MQTT mode
 
         # Large-scale system components
         from controllers.gpio_controller import GPIOController, GPIOConfig
@@ -93,7 +88,7 @@ class SystemMode(QObject):
         # Initialize GPIO controller with proper configuration for your hardware
         gpio_config = GPIOConfig(
             # Output Enable pins (5 chains) - HIGH when disabled, LOW when enabled
-            output_enable_pins=[5, 6, 7, 8, 12],
+            output_enable_pins=[2, 3, 4, 5, 6],
             output_enable_active_high=[False, False, False, False, False],  # LOW = enabled
 
             # Serial Clear pins (5 chains) - LOW when disabled, HIGH when enabled
@@ -101,7 +96,7 @@ class SystemMode(QObject):
             serial_clear_active_high=[True, True, True, True, True],  # HIGH = enabled
 
             # Shift register control pins (5 chains of 25 registers each)
-            data_pins=[2, 3, 4, 14, 15],  # Data pins for each chain
+            data_pins=[7, 8, 12, 14, 15],  # Data pins for each chain
             sclk_pins=[17, 18, 22, 23, 27],  # Serial clock pins
             rclk_pins=[9, 10, 11, 24, 25],  # Register clock (latch) pins
 
@@ -109,9 +104,8 @@ class SystemMode(QObject):
             arm_pin=21,
             arm_active_high=True,
 
-            # WiFi/Adhoc mode control pin (disabled - no GPIO functionality yet)
-            # wifi_mode_pin=1,  # Will be implemented later with SSH commands
-            # wifi_mode_active_high=True
+            # WiFi/Adhoc mode control is implemented with SSH commands to switch_wifi_mode.py
+            # No GPIO pin needed for this functionality
         )
         self.gpio_controller = GPIOController(gpio_config)
 
@@ -133,62 +127,19 @@ class SystemMode(QObject):
         self.show_execution_manager.progress_updated.connect(self._on_show_progress_updated)
         self.show_execution_manager.error_occurred.connect(self._on_show_execution_error)
 
-        # Professional MQTT Configuration
-        self.professional_mqtt_config = {
-            'broker_host': 'localhost',
-            'broker_port': 1883,
-            'username': '',
-            'password': '',
-            'use_ssl': False,
-            'ssl_cert_path': '',
-            'ssl_key_path': '',
-            'ssl_ca_path': '',
-            'client_id': 'firework_controller',
-            'keepalive': 60,
-            'qos_level': 2,  # Exactly once for safety
-            'topics': {
-                'command': 'firework/command',
-                'status': 'firework/status',
-                'emergency': 'firework/emergency',
-                'heartbeat': 'firework/heartbeat'
-            }
-        }
-
-        # Status monitoring
-        self.heartbeat_timer = QTimer()
-        self.heartbeat_timer.timeout.connect(self._send_heartbeat)
-        self.heartbeat_timer.setInterval(30000)  # 30 seconds
-
-        # Connection state
-        self.is_professional_mqtt_connected = False
-        self.last_error = ""
-
-        # Set up hardware controller connection parameters
-        self._update_hardware_controller_settings()
-
     def get_mode(self):
         """Get the current system mode"""
         return self.current_mode
-
-    def _update_hardware_controller_settings(self):
-        """Update the hardware controller with current connection settings"""
-        host = self.connection_settings.get("host", "raspberrypi.local")
-        mqtt_port = self.connection_settings.get("mqtt_port", 1883)
-        username = self.connection_settings.get("username")
-        password = self.connection_settings.get("password")
-
-        # Update hardware controller connection parameters
-        self.hardware_controller.set_connection_params(host, mqtt_port, username, password)
 
     def set_communication_method(self, method):
         """
         Set the communication method for hardware interaction
 
         Args:
-            method (str): Either 'ssh', 'mqtt', or 'both'
+            method (str): 'ssh'
         """
-        if method not in ["ssh", "mqtt", "both"]:
-            raise ValueError("Communication method must be either 'ssh', 'mqtt', or 'both'")
+        if method != "ssh":
+            raise ValueError("Communication method must be 'ssh'")
 
         print(f"Setting communication method to: {method}")
 
@@ -205,10 +156,6 @@ class SystemMode(QObject):
 
         self.communication_method = method
         print(f"Communication method set to: {self.communication_method}")
-
-        # Update hardware controller settings if using MQTT or both
-        if method in ["mqtt", "both"]:
-            self._update_hardware_controller_settings()
 
     async def set_mode(self, mode, connection_settings=None):
         """Set the system mode and optional connection settings"""
@@ -229,11 +176,6 @@ class SystemMode(QObject):
             print(f"Updating connection settings: {connection_settings}")
             self.connection_settings.update(connection_settings)
 
-            # Update hardware controller settings
-            print("Updating hardware controller settings...")
-            self._update_hardware_controller_settings()
-            print("Hardware controller settings updated")
-
         print(f"set_mode completed successfully for mode: {mode}")
         return True  # Explicitly return a value
 
@@ -246,25 +188,13 @@ class SystemMode(QObject):
         return self.current_mode == "simulation"
 
     async def connect_to_hardware(self):
-        """Connect to the Raspberry Pi via SSH or MQTT"""
+        """Connect to the Raspberry Pi via SSH"""
         print("Attempting hardware connection...")
         if not self.is_hardware_mode():
             print("Not in hardware mode, connection attempt aborted")
             return False, "Not in hardware mode"
 
-        # Use the appropriate connection method
-        if self.communication_method == "ssh":
-            return await self._connect_via_ssh()
-        elif self.communication_method == "mqtt":
-            return await self._connect_via_mqtt()
-        else:  # both
-            # Try MQTT first, then SSH as fallback
-            mqtt_success, mqtt_message = await self._connect_via_mqtt()
-            if mqtt_success:
-                return mqtt_success, mqtt_message
-            else:
-                print("MQTT connection failed, trying SSH as fallback")
-                return await self._connect_via_ssh()
+        return await self._connect_via_ssh()
 
     async def _connect_via_ssh(self):
         """Connect to the Raspberry Pi via SSH (using synchronous method)"""
@@ -319,48 +249,6 @@ class SystemMode(QObject):
             self.ssh_connection = None
             return False, f"Unexpected error during SSH connection: {str(e)}"
 
-    async def _connect_via_mqtt(self):
-        """Connect to the Raspberry Pi via MQTT"""
-        try:
-            print(f"Connecting to: {self.connection_settings['host']} via MQTT")
-
-            # Update hardware controller settings
-            self._update_hardware_controller_settings()
-
-            # Connect to MQTT broker
-            success = self.hardware_controller.connect()
-
-            if success:
-                print("MQTT connection initiated successfully")
-
-                # Also configure professional MQTT for hardware control
-                try:
-                    professional_config = {
-                        'host': self.connection_settings['host'],
-                        'port': self.connection_settings.get('mqtt_port', 1883),
-                        'use_ssl': False,
-                        'topics': {
-                            'command': 'fireworks/command',
-                            'status': 'fireworks/status',
-                            'response': 'fireworks/response',
-                            'heartbeat': 'fireworks/heartbeat'
-                        }
-                    }
-                    print("Configuring professional MQTT for hardware control...")
-                    self.configure_professional_mqtt(professional_config)
-                except Exception as mqtt_error:
-                    print(f"Professional MQTT configuration failed: {mqtt_error}")
-                    # Don't fail the main connection for this
-
-                return True, "Successfully initiated connection to Raspberry Pi via MQTT"
-            else:
-                print("MQTT connection failed to initiate")
-                return False, "Failed to initiate MQTT connection"
-
-        except Exception as e:
-            print(f"Unexpected error during MQTT connection: {str(e)}")
-            return False, f"Unexpected error during MQTT connection: {str(e)}"
-
     async def close_connection(self):
         """Close any active connections"""
         try:
@@ -396,44 +284,9 @@ class SystemMode(QObject):
                 print(f"Error closing SSH connection: {e}")
                 self.ssh_connection = None
 
-        # Disconnect MQTT client if using MQTT or both
-        if self.communication_method in ["mqtt", "both"]:
-            print("Disconnecting MQTT client")
-            try:
-                self.hardware_controller.disconnect()
-                print("MQTT client disconnected")
-            except Exception as e:
-                print(f"Error disconnecting MQTT client: {e}")
-
-        # Disconnect professional MQTT client if it exists
-        if self.professional_mqtt_client:
-            print("Disconnecting professional MQTT client")
-            try:
-                self.professional_mqtt_client.disconnect()
-                self.professional_mqtt_client = None
-                print("Professional MQTT client disconnected")
-            except Exception as e:
-                print(f"Error disconnecting professional MQTT client: {e}")
-
     async def test_connection(self):
         """Test the connection to the Raspberry Pi"""
-        if self.communication_method == "ssh":
-            return self.test_ssh_connection_sync()  # Use synchronous version
-        elif self.communication_method == "mqtt":
-            return await self.test_mqtt_connection()
-        else:  # both
-            # Test both connections
-            mqtt_success, mqtt_message = await self.test_mqtt_connection()
-            ssh_success, ssh_message = self.test_ssh_connection_sync()
-
-            if mqtt_success and ssh_success:
-                return True, "Both SSH and MQTT connections successful"
-            elif mqtt_success:
-                return True, f"MQTT connection successful. SSH failed: {ssh_message}"
-            elif ssh_success:
-                return True, f"SSH connection successful. MQTT failed: {mqtt_message}"
-            else:
-                return False, f"Both connections failed. SSH: {ssh_message}, MQTT: {mqtt_message}"
+        return self.test_ssh_connection_sync()  # Use synchronous version
 
     def test_ssh_connection_sync(self):
         """Test SSH connection to the Raspberry Pi (synchronous version)"""
@@ -499,55 +352,13 @@ class SystemMode(QObject):
         """Test SSH connection (async wrapper for compatibility)"""
         return self.test_ssh_connection_sync()
 
-    async def test_mqtt_connection(self):
-        """Test MQTT connection to the Raspberry Pi"""
-        try:
-            print(f"Testing MQTT connection to {self.connection_settings['host']}")
-
-            # Test basic connectivity first
-            import socket
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-
-            mqtt_port = self.connection_settings.get('mqtt_port', 1883)
-            result = sock.connect_ex((self.connection_settings['host'], mqtt_port))
-            sock.close()
-
-            if result == 0:
-                print("MQTT port is reachable")
-
-                # Try to test actual MQTT connection if hardware controller supports it
-                if hasattr(self.hardware_controller, 'test_connection'):
-                    return await self.hardware_controller.test_connection()
-                else:
-                    return True, f"MQTT port {mqtt_port} is reachable!"
-            else:
-                print(f"Cannot reach MQTT port {mqtt_port}")
-                return False, f"Cannot reach MQTT port {mqtt_port}"
-
-        except Exception as e:
-            print(f"MQTT connection test failed: {str(e)}")
-            return False, f"MQTT connection test failed: {str(e)}"
-
     async def execute_command(self, command):
         """Execute a command on the target system"""
         if self.is_simulation_mode():
             print(f"[SIMULATION] Would execute: {command}")
             return True, f"Simulated execution of: {command}"
 
-        # Use the appropriate communication method
-        if self.communication_method == "ssh":
-            return await self._execute_via_ssh(command)
-        elif self.communication_method == "mqtt":
-            return await self._execute_via_mqtt(command)
-        else:  # both
-            # Try MQTT first, then SSH as fallback
-            mqtt_success, mqtt_message = await self._execute_via_mqtt(command)
-            if mqtt_success:
-                return mqtt_success, mqtt_message
-            else:
-                print("MQTT execution failed, trying SSH as fallback")
-                return await self._execute_via_ssh(command)
+        return await self._execute_via_ssh(command)
 
     async def _execute_via_ssh(self, command):
         """Execute a command via SSH"""
@@ -593,29 +404,6 @@ class SystemMode(QObject):
             except Exception as cleanup_error:
                 print(f"Error closing SSH streams: {cleanup_error}")
 
-    async def _execute_via_mqtt(self, command):
-        """Execute a command via MQTT"""
-        # Ensure we're connected
-        if not self.hardware_controller.is_hardware_connected():
-            success, message = await self._connect_via_mqtt()
-            if not success:
-                return False, message
-
-        try:
-            print(f"Executing command via MQTT: {command}")
-
-            # Convert command to a format suitable for MQTT
-            command_data = {"command_text": command}
-
-            # Send the command
-            success, message = await self.hardware_controller.send_command("execute", command_data)
-
-            return success, message
-
-        except Exception as e:
-            print(f"MQTT command execution failed: {str(e)}")
-            return False, f"Command execution failed: {str(e)}"
-
     async def send_cue(self, cue_data):
         """
         Send a cue to the Raspberry Pi
@@ -630,23 +418,9 @@ class SystemMode(QObject):
             print(f"[SIMULATION] Would send cue: {cue_data}")
             return True, f"Simulated sending of cue: {cue_data.get('cue_number', '')}"
 
-        # Use the appropriate communication method
-        if self.communication_method == "ssh":
-            # For SSH, convert cue to a command and execute
-            command = self._convert_cue_to_command(cue_data)
-            return await self._execute_via_ssh(command)
-        elif self.communication_method == "mqtt":
-            # For MQTT, use the hardware controller to send the cue
-            return await self.hardware_controller.send_cue(cue_data)
-        else:  # both
-            # Try MQTT first, then SSH as fallback
-            mqtt_success, mqtt_message = await self.hardware_controller.send_cue(cue_data)
-            if mqtt_success:
-                return mqtt_success, mqtt_message
-            else:
-                print("MQTT cue sending failed, trying SSH as fallback")
-                command = self._convert_cue_to_command(cue_data)
-                return await self._execute_via_ssh(command)
+        # Convert cue to a command and execute
+        command = self._convert_cue_to_command(cue_data)
+        return await self._execute_via_ssh(command)
 
     def _convert_cue_to_command(self, cue_data):
         """
@@ -664,331 +438,6 @@ class SystemMode(QObject):
         outputs = ",".join(map(str, cue_data.get("output_values", [])))
 
         return f"python3 /home/pi/execute_cue.py --cue={cue_number} --type={cue_type} --outputs={outputs}"
-
-    # Professional MQTT Methods
-    def enable_professional_mqtt(self, enable: bool = True):
-        """Enable or disable professional MQTT mode"""
-        self.use_professional_mqtt = enable
-        if enable:
-            print("Professional MQTT mode enabled")
-        else:
-            print("Professional MQTT mode disabled")
-            if self.professional_mqtt_client:
-                self.disconnect_professional_mqtt()
-
-    def initialize_professional_mqtt(self, config: Dict[str, Any] = None) -> bool:
-        """Initialize professional MQTT connection with given configuration"""
-        try:
-            if config:
-                self.professional_mqtt_config.update(config)
-
-            # Create professional MQTT client with proper ConnectionConfig
-            from hardware.mqtt_client import ConnectionConfig
-
-            mqtt_config = ConnectionConfig(
-                host=self.professional_mqtt_config['broker_host'],
-                port=self.professional_mqtt_config['broker_port'],
-                client_id=self.professional_mqtt_config['client_id'],
-                username=self.professional_mqtt_config.get('username'),
-                password=self.professional_mqtt_config.get('password'),
-                use_ssl=self.professional_mqtt_config.get('use_ssl', False),
-                ca_cert_path=self.professional_mqtt_config.get('ssl_ca_path'),
-                cert_file_path=self.professional_mqtt_config.get('ssl_cert_path'),
-                key_file_path=self.professional_mqtt_config.get('ssl_key_path'),
-                keepalive=self.professional_mqtt_config.get('keepalive', 60)
-            )
-
-            self.professional_mqtt_client = MQTTClient(mqtt_config)
-
-            # Connect signals
-            self.professional_mqtt_client.connection_state_changed.connect(self._on_professional_mqtt_state_changed)
-            self.professional_mqtt_client.message_received.connect(self._on_professional_mqtt_message_received)
-            self.professional_mqtt_client.error_occurred.connect(self._on_professional_mqtt_error)
-
-            # Connect to broker
-            success = self.professional_mqtt_client.connect()
-            if success:
-                self._subscribe_to_professional_topics()
-                self.heartbeat_timer.start()
-
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Failed to initialize professional MQTT: {e}")
-            self.error_occurred.emit(f"Professional MQTT initialization failed: {e}")
-            return False
-
-    def disconnect_professional_mqtt(self):
-        """Disconnect from professional MQTT broker"""
-        try:
-            self.heartbeat_timer.stop()
-            if self.professional_mqtt_client:
-                self.professional_mqtt_client.disconnect()
-                self.professional_mqtt_client = None
-            self.is_professional_mqtt_connected = False
-            self.connection_status_changed.emit(False, "Disconnected from professional MQTT")
-        except Exception as e:
-            self.logger.error(f"Error disconnecting professional MQTT: {e}")
-
-    async def send_professional_cue(self, cue_data: Dict[str, Any]) -> tuple:
-        """Send firework cue command via professional MQTT"""
-        try:
-            if not self.use_professional_mqtt:
-                # Fall back to regular cue sending
-                return await self.send_cue(cue_data)
-
-            if not self.is_professional_mqtt_connected or not self.professional_mqtt_client:
-                return False, "Professional MQTT not connected"
-
-            # Format data for shift registers
-            shift_data = self.shift_register_formatter.format_cue_data(cue_data)
-
-            # Create command message
-            command = {
-                'type': 'firework_cue',
-                'timestamp': self._get_timestamp(),
-                'cue_id': cue_data.get('cue_id'),
-                'cue_number': cue_data.get('cue_number'),
-                'shift_register_data': shift_data,
-                'safety_check': True
-            }
-
-            # Send with QoS 2 for exactly-once delivery
-            success = self.professional_mqtt_client.publish(
-                self.professional_mqtt_config['topics']['command'],
-                json.dumps(command),
-                qos=2
-            )
-
-            if success:
-                self.logger.info(f"Sent professional firework command for cue {cue_data.get('cue_number')}")
-                return True, f"Professional cue {cue_data.get('cue_number')} sent successfully"
-            else:
-                return False, "Failed to send professional firework command"
-
-        except Exception as e:
-            self.logger.error(f"Error sending professional firework command: {e}")
-            return False, f"Professional command send error: {e}"
-
-    def send_emergency_stop(self) -> bool:
-        """Send emergency stop command via professional MQTT"""
-        try:
-            if not self.use_professional_mqtt or not self.is_professional_mqtt_connected or not self.professional_mqtt_client:
-                return False
-
-            emergency_command = {
-                'type': 'emergency_stop',
-                'timestamp': self._get_timestamp(),
-                'priority': 'critical'
-            }
-
-            # Send with highest priority
-            success = self.professional_mqtt_client.publish(
-                self.professional_mqtt_config['topics']['emergency'],
-                json.dumps(emergency_command),
-                qos=2
-            )
-
-            if success:
-                self.logger.critical("Emergency stop command sent via professional MQTT")
-
-            return success
-
-        except Exception as e:
-            self.logger.error(f"Error sending emergency stop: {e}")
-            return False
-
-    def get_professional_mqtt_status(self) -> Dict[str, Any]:
-        """Get current professional MQTT connection status and metrics"""
-        if not self.professional_mqtt_client:
-            return {
-                'connected': False,
-                'status': 'Not initialized',
-                'broker': 'N/A',
-                'client_id': 'N/A',
-                'last_error': self.last_error,
-                'enabled': self.use_professional_mqtt
-            }
-
-        return {
-            'connected': self.is_professional_mqtt_connected,
-            'status': 'Connected' if self.is_professional_mqtt_connected else 'Disconnected',
-            'broker': f"{self.professional_mqtt_config['broker_host']}:{self.professional_mqtt_config['broker_port']}",
-            'client_id': self.professional_mqtt_config['client_id'],
-            'ssl_enabled': self.professional_mqtt_config.get('use_ssl', False),
-            'qos_level': self.professional_mqtt_config.get('qos_level', 2),
-            'last_error': self.last_error,
-            'enabled': self.use_professional_mqtt,
-            'connection_quality': self.professional_mqtt_client.get_connection_quality() if self.professional_mqtt_client else {}
-        }
-
-    def configure_professional_mqtt(self, config: Dict[str, Any]):
-        """Configure and initialize professional MQTT with given configuration"""
-        try:
-            print(f"Configuring professional MQTT with config: {config}")
-
-            # Update configuration
-            self.professional_mqtt_config.update(config)
-
-            # Enable professional MQTT mode
-            self.enable_professional_mqtt(True)
-
-            # Initialize with new configuration
-            success = self.initialize_professional_mqtt(config)
-
-            if success:
-                print("Professional MQTT configured and connected successfully")
-            else:
-                print("Professional MQTT configuration failed")
-
-            return success
-
-        except Exception as e:
-            print(f"Error configuring professional MQTT: {e}")
-            return False
-
-    def update_professional_mqtt_config(self, new_config: Dict[str, Any]):
-        """Update professional MQTT configuration"""
-        self.professional_mqtt_config.update(new_config)
-
-        # If connected, reconnect with new config
-        if self.is_professional_mqtt_connected:
-            self.disconnect_professional_mqtt()
-            self.initialize_professional_mqtt()
-
-    def test_professional_mqtt_connection(self) -> Dict[str, Any]:
-        """Test professional MQTT connection and return results"""
-        try:
-            # Create temporary client for testing
-            from hardware.mqtt_client import ConnectionConfig
-
-            test_config = ConnectionConfig(
-                host=self.professional_mqtt_config['broker_host'],
-                port=self.professional_mqtt_config['broker_port'],
-                client_id=f"{self.professional_mqtt_config['client_id']}_test",
-                username=self.professional_mqtt_config.get('username'),
-                password=self.professional_mqtt_config.get('password'),
-                use_ssl=self.professional_mqtt_config.get('use_ssl', False),
-                ca_cert_path=self.professional_mqtt_config.get('ssl_ca_path'),
-                cert_file_path=self.professional_mqtt_config.get('ssl_cert_path'),
-                key_file_path=self.professional_mqtt_config.get('ssl_key_path')
-            )
-
-            test_client = MQTTClient(test_config)
-
-            success = test_client.connect()
-            if success:
-                test_client.disconnect()
-                return {
-                    'success': True,
-                    'message': 'Professional MQTT connection test successful',
-                    'broker': f"{self.professional_mqtt_config['broker_host']}:{self.professional_mqtt_config['broker_port']}"
-                }
-            else:
-                return {
-                    'success': False,
-                    'message': 'Professional MQTT connection test failed',
-                    'error': 'Unable to connect to broker'
-                }
-
-        except Exception as e:
-            return {
-                'success': False,
-                'message': 'Professional MQTT connection test failed',
-                'error': str(e)
-            }
-
-    # Private methods for professional MQTT
-    def _subscribe_to_professional_topics(self):
-        """Subscribe to required professional MQTT topics"""
-        if not self.professional_mqtt_client:
-            return
-
-        topics = [
-            (self.professional_mqtt_config['topics']['status'], 1),
-            (self.professional_mqtt_config['topics']['emergency'], 2),
-            (self.professional_mqtt_config['topics']['heartbeat'], 0)
-        ]
-
-        for topic, qos in topics:
-            self.professional_mqtt_client.subscribe(topic, qos)
-
-    def _on_professional_mqtt_state_changed(self, state):
-        """Handle professional MQTT connection state changes"""
-        from hardware.mqtt_client import ConnectionState
-
-        if state == ConnectionState.CONNECTED:
-            self.is_professional_mqtt_connected = True
-            self.last_error = ""
-            self.connection_status_changed.emit(True, "Connected to professional MQTT broker")
-            self.logger.info("Professional MQTT connection established")
-        elif state == ConnectionState.DISCONNECTED:
-            self.is_professional_mqtt_connected = False
-            self.connection_status_changed.emit(False, "Disconnected from professional MQTT broker")
-            self.logger.warning("Professional MQTT connection lost")
-        elif state == ConnectionState.CONNECTING:
-            self.logger.info("Professional MQTT connecting...")
-        elif state == ConnectionState.ERROR:
-            self.is_professional_mqtt_connected = False
-            self.connection_status_changed.emit(False, "Professional MQTT connection error")
-            self.logger.error("Professional MQTT connection error")
-
-    def _on_professional_mqtt_message_received(self, topic: str, message: str):
-        """Handle received professional MQTT message"""
-        try:
-            self.message_received.emit(topic, message)
-
-            # Handle specific message types
-            if topic == self.professional_mqtt_config['topics']['status']:
-                self._handle_professional_status_message(message)
-            elif topic == self.professional_mqtt_config['topics']['emergency']:
-                self._handle_professional_emergency_message(message)
-
-        except Exception as e:
-            self.logger.error(f"Error processing received professional MQTT message: {e}")
-
-    def _on_professional_mqtt_error(self, error_message: str):
-        """Handle professional MQTT error"""
-        self.last_error = error_message
-        self.error_occurred.emit(f"Professional MQTT: {error_message}")
-        self.logger.error(f"Professional MQTT error: {error_message}")
-
-    def _handle_professional_status_message(self, message: str):
-        """Handle professional hardware status message"""
-        try:
-            status_data = json.loads(message)
-            self.hardware_status_updated.emit(status_data)
-        except json.JSONDecodeError:
-            self.logger.error("Invalid professional status message format")
-
-    def _handle_professional_emergency_message(self, message: str):
-        """Handle professional emergency message"""
-        try:
-            emergency_data = json.loads(message)
-            self.logger.critical(f"Professional emergency message received: {emergency_data}")
-            # Trigger emergency procedures
-        except json.JSONDecodeError:
-            self.logger.error("Invalid professional emergency message format")
-
-    def _send_heartbeat(self):
-        """Send heartbeat message via professional MQTT"""
-        if self.use_professional_mqtt and self.is_professional_mqtt_connected and self.professional_mqtt_client:
-            heartbeat = {
-                'timestamp': self._get_timestamp(),
-                'status': 'alive',
-                'client_id': self.professional_mqtt_config['client_id']
-            }
-
-            self.professional_mqtt_client.publish(
-                self.professional_mqtt_config['topics']['heartbeat'],
-                json.dumps(heartbeat),
-                qos=0
-            )
-
-    def _get_timestamp(self) -> str:
-        """Get current timestamp"""
-        from datetime import datetime
-        return datetime.now().isoformat()
 
     # Button Integration Methods for Large-Scale System
 
@@ -1009,31 +458,55 @@ class SystemMode(QObject):
             print(f"  {line.strip()}")
 
         try:
+            # First update local GPIO controller state
             new_state = self.gpio_controller.toggle_outputs_enabled()
             print(f"SystemMode: received new_state from gpio_controller: {new_state}")
 
-            # Send MQTT command to Pi
-            if self.use_professional_mqtt and self.is_professional_mqtt_connected:
-                print("SystemMode: Sending MQTT command")
-                command = self.gpio_controller.create_gpio_command(
-                    "toggle_outputs",
-                    enabled=new_state
-                )
+            # Prepare status message for UI feedback
+            status_message = f"Outputs {'enabled' if new_state else 'disabled'}"
 
-                success = self.professional_mqtt_client.publish(
-                    self.professional_mqtt_config['topics']['command'],
-                    json.dumps(command),
-                    qos=2
-                )
+            # Send SSH command to Pi if in hardware mode
+            if self.is_hardware_mode():
+                if self.ssh_connection:
+                    print("SystemMode: Sending SSH command")
+                    command = f"python3 /home/pi/toggle_outputs.py --enabled={int(new_state)}"
 
-                if success:
-                    self.logger.info(f"Outputs {'enabled' if new_state else 'disabled'} via MQTT")
-                    print(f"SystemMode: MQTT command sent successfully")
+                    # Execute command synchronously
+                    try:
+                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                        exit_status = stdout.channel.recv_exit_status()
+
+                        if exit_status == 0:
+                            output = stdout.read().decode().strip()
+                            self.logger.info(f"{status_message} via SSH: {output}")
+                            print(f"SystemMode: SSH command sent successfully: {output}")
+
+                            # Emit message for UI feedback
+                            self.message_received.emit("gpio_status", f"{status_message} successfully")
+                        else:
+                            error = stderr.read().decode().strip()
+                            self.logger.error(f"Failed to send outputs command via SSH: {error}")
+                            print(f"SystemMode: SSH command failed: {error}")
+
+                            # Emit error for UI feedback but don't change state
+                            self.error_occurred.emit(
+                                f"Warning: {status_message} in UI only. Hardware control failed: {error}")
+                    except Exception as e:
+                        self.logger.error(f"Error sending SSH command: {e}")
+                        print(f"SystemMode: SSH command error: {e}")
+
+                        # Emit error for UI feedback
+                        self.error_occurred.emit(
+                            f"Warning: {status_message} in UI only. Hardware control error: {str(e)}")
                 else:
-                    self.logger.error("Failed to send outputs command via MQTT")
-                    print("SystemMode: MQTT command failed")
+                    print("SystemMode: SSH not connected, cannot send command")
+                    self.error_occurred.emit(f"Warning: {status_message} in UI only. No SSH connection to hardware.")
             else:
-                print("SystemMode: Professional MQTT not connected, skipping MQTT command")
+                print("SystemMode: In simulation mode, skipping SSH command")
+                self.message_received.emit("gpio_status", f"Simulation: {status_message}")
+
+            # Update hardware status signal with latest GPIO state
+            self.hardware_status_updated.emit(self.gpio_controller.get_system_status())
 
             print(f"SystemMode: returning new_state: {new_state}")
             return new_state
@@ -1056,33 +529,66 @@ class SystemMode(QObject):
             bool: New armed state
         """
         try:
+            # First check if outputs are enabled before arming
+            if not self.gpio_controller.outputs_enabled and not self.gpio_controller.system_armed:
+                self.logger.warning("Cannot arm system - outputs not enabled")
+                self.error_occurred.emit("Cannot arm: outputs must be enabled first")
+                return False
+
+            # Update local GPIO controller state
             current_armed = self.gpio_controller.system_armed
             new_state = self.gpio_controller.set_arm_state(not current_armed)
 
-            # Send MQTT command to Pi
-            if self.use_professional_mqtt and self.is_professional_mqtt_connected:
-                command = self.gpio_controller.create_gpio_command(
-                    "set_arm_state",
-                    armed=new_state
-                )
+            # Prepare status message for UI feedback
+            status_message = f"System {'armed' if new_state else 'disarmed'}"
 
-                success = self.professional_mqtt_client.publish(
-                    self.professional_mqtt_config['topics']['command'],
-                    json.dumps(command),
-                    qos=2
-                )
+            # Send SSH command to Pi if in hardware mode
+            if self.is_hardware_mode():
+                if self.ssh_connection:
+                    command = f"python3 /home/pi/set_arm_state.py --armed={int(new_state)}"
 
-                if success:
-                    self.logger.info(f"System {'armed' if new_state else 'disarmed'} via MQTT")
+                    # Execute command synchronously
+                    try:
+                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                        exit_status = stdout.channel.recv_exit_status()
+
+                        if exit_status == 0:
+                            output = stdout.read().decode().strip()
+                            self.logger.info(f"{status_message} via SSH: {output}")
+
+                            # Emit message for UI feedback
+                            self.message_received.emit("gpio_status", f"{status_message} successfully")
+                        else:
+                            error = stderr.read().decode().strip()
+                            self.logger.error(f"Failed to send arm command via SSH: {error}")
+
+                            # Emit error for UI feedback but don't change state
+                            self.error_occurred.emit(
+                                f"Warning: {status_message} in UI only. Hardware control failed: {error}")
+                    except Exception as e:
+                        self.logger.error(f"Error sending SSH command: {e}")
+
+                        # Emit error for UI feedback
+                        self.error_occurred.emit(
+                            f"Warning: {status_message} in UI only. Hardware control error: {str(e)}")
                 else:
-                    self.logger.error("Failed to send arm command via MQTT")
+                    self.logger.warning("SSH not connected, cannot send arm command")
+                    self.error_occurred.emit(f"Warning: {status_message} in UI only. No SSH connection to hardware.")
+            else:
+                self.logger.info(f"Simulation: {status_message}")
+                self.message_received.emit("gpio_status", f"Simulation: {status_message}")
+
+            # Update hardware status signal with latest GPIO state
+            self.hardware_status_updated.emit(self.gpio_controller.get_system_status())
 
             return new_state
 
         except Exception as e:
             self.logger.error(f"Failed to handle arm outputs: {e}")
             self.error_occurred.emit(f"Arm outputs failed: {e}")
-            return False
+            # Return the current state instead of False to avoid incorrect UI updates
+            current_state = getattr(self.gpio_controller, 'system_armed', False)
+            return current_state
 
     async def handle_execute_cue_button(self, selected_cue: Dict[str, Any]) -> bool:
         """
@@ -1107,13 +613,47 @@ class SystemMode(QObject):
 
             self.logger.info(f"Executing single cue: {selected_cue['cue_id']}")
 
+            # Prepare status message for UI feedback
+            status_message = f"Executing cue {selected_cue.get('cue_id', '')}"
+            self.message_received.emit("cue_status", status_message)
+
             # Execute through show execution manager for consistency
             success = await self.show_execution_manager.execute_single_cue(selected_cue)
 
+            # If in hardware mode, also send SSH command to Pi
+            if self.is_hardware_mode() and self.ssh_connection:
+                try:
+                    # Convert cue data to JSON string
+                    import json
+                    cue_json = json.dumps(selected_cue)
+
+                    # Build command to execute the cue
+                    command = f"python3 /home/pi/execute_cue.py --json='{cue_json}'"
+
+                    # Execute command synchronously
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"Cue executed via SSH: {output}")
+                        success = True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to execute cue via SSH: {error}")
+                        self.error_occurred.emit(f"Hardware cue execution failed: {error}")
+                        success = False
+                except Exception as ssh_e:
+                    self.logger.error(f"SSH cue execution error: {ssh_e}")
+                    self.error_occurred.emit(f"SSH cue execution error: {str(ssh_e)}")
+                    success = False
+
             if success:
                 self.logger.info(f"Cue {selected_cue['cue_id']} executed successfully")
+                self.message_received.emit("cue_status", f"Cue {selected_cue.get('cue_id', '')} executed successfully")
             else:
                 self.logger.error(f"Cue {selected_cue['cue_id']} execution failed")
+                self.error_occurred.emit(f"Cue {selected_cue.get('cue_id', '')} execution failed")
 
             return success
 
@@ -1140,14 +680,54 @@ class SystemMode(QObject):
 
             self.logger.info(f"Starting show execution with {len(show_cues)} cues")
 
-            # Load and execute the show
+            # Prepare status message for UI feedback
+            status_message = f"Starting show execution with {len(show_cues)} cues"
+            self.message_received.emit("show_status", status_message)
+
+            # Load and execute the show in the local show execution manager
             if self.show_execution_manager.load_show(show_cues):
                 success = await self.show_execution_manager.execute_show()
 
+                # If in hardware mode, also send SSH command to Pi
+                if self.is_hardware_mode() and self.ssh_connection:
+                    try:
+                        # Convert show data to JSON string
+                        import json
+                        show_json = json.dumps({"cues": show_cues})
+
+                        # Create a temporary file on the Pi to store the show data
+                        temp_file = f"/home/pi/show_{int(time.time())}.json"
+                        create_file_cmd = f"echo '{show_json}' > {temp_file}"
+
+                        # Execute command to create the file
+                        stdin, stdout, stderr = self.ssh_connection.exec_command(create_file_cmd)
+                        exit_status = stdout.channel.recv_exit_status()
+
+                        if exit_status == 0:
+                            # Build command to execute the show
+                            command = f"python3 /home/pi/execute_show.py --show={temp_file} &"
+
+                            # Execute command to start the show
+                            stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+
+                            self.logger.info(f"Show execution started via SSH")
+                            success = True
+                        else:
+                            error = stderr.read().decode().strip()
+                            self.logger.error(f"Failed to create show file on Pi: {error}")
+                            self.error_occurred.emit(f"Hardware show execution failed: {error}")
+                            success = False
+                    except Exception as ssh_e:
+                        self.logger.error(f"SSH show execution error: {ssh_e}")
+                        self.error_occurred.emit(f"SSH show execution error: {str(ssh_e)}")
+                        success = False
+
                 if success:
                     self.logger.info("Show execution started successfully")
+                    self.message_received.emit("show_status", "Show execution started successfully")
                 else:
                     self.logger.error("Failed to start show execution")
+                    self.error_occurred.emit("Failed to start show execution")
 
                 return success
             else:
@@ -1168,12 +748,42 @@ class SystemMode(QObject):
             bool: True if paused successfully
         """
         try:
+            # Pause the show in the local show execution manager
             success = self.show_execution_manager.pause_show()
 
+            # Prepare status message for UI feedback
+            status_message = "Show paused"
+
+            # If in hardware mode, also send SSH command to Pi
+            if self.is_hardware_mode() and self.ssh_connection:
+                try:
+                    # Build command to pause the show
+                    command = "python3 /home/pi/control_show.py --action=pause"
+
+                    # Execute command synchronously
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"Show paused via SSH: {output}")
+                        success = True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to pause show via SSH: {error}")
+                        self.error_occurred.emit(f"Hardware show pause failed: {error}")
+                        # Don't set success to false if local pause succeeded
+                except Exception as ssh_e:
+                    self.logger.error(f"SSH pause error: {ssh_e}")
+                    self.error_occurred.emit(f"SSH pause error: {str(ssh_e)}")
+                    # Don't set success to false if local pause succeeded
+
             if success:
-                self.logger.info("Show paused")
+                self.logger.info(status_message)
+                self.message_received.emit("show_status", status_message)
             else:
                 self.logger.warning("Failed to pause show")
+                self.error_occurred.emit("Failed to pause show")
 
             return success
 
@@ -1191,12 +801,42 @@ class SystemMode(QObject):
             bool: True if resumed successfully
         """
         try:
+            # Resume the show in the local show execution manager
             success = self.show_execution_manager.resume_show()
 
+            # Prepare status message for UI feedback
+            status_message = "Show resumed"
+
+            # If in hardware mode, also send SSH command to Pi
+            if self.is_hardware_mode() and self.ssh_connection:
+                try:
+                    # Build command to resume the show
+                    command = "python3 /home/pi/control_show.py --action=resume"
+
+                    # Execute command synchronously
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"Show resumed via SSH: {output}")
+                        success = True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to resume show via SSH: {error}")
+                        self.error_occurred.emit(f"Hardware show resume failed: {error}")
+                        # Don't set success to false if local resume succeeded
+                except Exception as ssh_e:
+                    self.logger.error(f"SSH resume error: {ssh_e}")
+                    self.error_occurred.emit(f"SSH resume error: {str(ssh_e)}")
+                    # Don't set success to false if local resume succeeded
+
             if success:
-                self.logger.info("Show resumed")
+                self.logger.info(status_message)
+                self.message_received.emit("show_status", status_message)
             else:
                 self.logger.warning("Failed to resume show")
+                self.error_occurred.emit("Failed to resume show")
 
             return success
 
@@ -1214,33 +854,102 @@ class SystemMode(QObject):
             bool: True if aborted successfully
         """
         try:
-            # Abort the show
-            show_aborted = self.show_execution_manager.abort_show("User abort button pressed")
+            self.logger.critical("EMERGENCY ABORT INITIATED")
+            self.message_received.emit("system_status", "EMERGENCY ABORT INITIATED")
 
-            # Emergency abort GPIO states
-            gpio_aborted = self.gpio_controller.emergency_abort()
+            # Track success of each abort component
+            abort_results = {
+                "show": False,
+                "gpio": False,
+                "hardware": False
+            }
 
-            # Send emergency stop via MQTT
-            if self.use_professional_mqtt and self.is_professional_mqtt_connected:
-                emergency_command = {
-                    'type': 'emergency_stop',
-                    'timestamp': self._get_timestamp(),
-                    'reason': 'Abort button pressed',
-                    'priority': 'critical'
-                }
+            # 1. Abort the show first
+            try:
+                show_aborted = self.show_execution_manager.abort_show("User abort button pressed")
+                abort_results["show"] = show_aborted
+                if show_aborted:
+                    self.logger.info("Show execution aborted successfully")
+                else:
+                    self.logger.warning("Show abort may not have completed successfully")
+            except Exception as show_e:
+                self.logger.error(f"Error aborting show: {show_e}")
+                self.error_occurred.emit(f"Show abort error: {str(show_e)}")
 
-                self.professional_mqtt_client.publish(
-                    self.professional_mqtt_config['topics']['emergency'],
-                    json.dumps(emergency_command),
-                    qos=2
-                )
+            # 2. Emergency abort GPIO states locally
+            try:
+                gpio_aborted = self.gpio_controller.emergency_abort()
+                abort_results["gpio"] = gpio_aborted
+                if gpio_aborted:
+                    self.logger.info("Local GPIO states reset successfully")
+                else:
+                    self.logger.warning("Local GPIO abort may not have completed successfully")
+            except Exception as gpio_e:
+                self.logger.error(f"Error aborting GPIO states: {gpio_e}")
+                self.error_occurred.emit(f"GPIO abort error: {str(gpio_e)}")
 
-            success = show_aborted and gpio_aborted
+            # 3. Send emergency stop and abort commands via SSH to hardware
+            if self.is_hardware_mode():
+                if self.ssh_connection:
+                    try:
+                        # First send the show abort command
+                        abort_command = "python3 /home/pi/control_show.py --action=abort"
+                        stdin, stdout, stderr = self.ssh_connection.exec_command(abort_command)
+                        exit_status = stdout.channel.recv_exit_status()
 
-            if success:
-                self.logger.critical("ABORT: Show stopped and system disarmed")
+                        if exit_status == 0:
+                            self.logger.info("Show abort command sent via SSH successfully")
+                        else:
+                            error = stderr.read().decode().strip()
+                            self.logger.error(f"Failed to send show abort command via SSH: {error}")
+
+                        # Then send the emergency stop command
+                        command = "python3 /home/pi/emergency_stop.py"
+                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                        exit_status = stdout.channel.recv_exit_status()
+
+                        if exit_status == 0:
+                            output = stdout.read().decode().strip()
+                            self.logger.info(f"Hardware emergency stop successful: {output}")
+                            abort_results["hardware"] = True
+                        else:
+                            error = stderr.read().decode().strip()
+                            self.logger.error(f"Failed to send emergency stop via SSH: {error}")
+                            self.error_occurred.emit(f"Hardware emergency stop failed: {error}")
+                    except Exception as ssh_e:
+                        self.logger.error(f"Error sending emergency stop via SSH: {ssh_e}")
+                        self.error_occurred.emit(f"Hardware emergency stop error: {str(ssh_e)}")
+                else:
+                    self.logger.warning("SSH not connected, cannot send hardware emergency stop")
+                    self.error_occurred.emit("Warning: Hardware emergency stop not sent - no SSH connection")
             else:
-                self.logger.error("ABORT: Partial failure in abort sequence")
+                self.logger.info("In simulation mode, skipping hardware emergency stop")
+                abort_results["hardware"] = True  # Consider successful in simulation mode
+
+            # Determine overall success
+            if self.is_hardware_mode():
+                success = abort_results["show"] and abort_results["gpio"] and abort_results["hardware"]
+            else:
+                success = abort_results["show"] and abort_results["gpio"]
+
+            # Update hardware status signal with latest GPIO state
+            self.hardware_status_updated.emit(self.gpio_controller.get_system_status())
+
+            # Final status message
+            if success:
+                status_message = "ABORT: Show stopped and system disarmed successfully"
+                self.logger.critical(status_message)
+                self.message_received.emit("system_status", status_message)
+            else:
+                failed_components = []
+                if not abort_results["show"]: failed_components.append("show execution")
+                if not abort_results["gpio"]: failed_components.append("local GPIO control")
+                if not abort_results["hardware"] and self.is_hardware_mode():
+                    failed_components.append("hardware control")
+
+                status_message = f"ABORT: Partial failure in abort sequence. Failed components: {', '.join(failed_components)}"
+                self.logger.error(status_message)
+                self.error_occurred.emit(status_message)
 
             return success
 
@@ -1248,14 +957,6 @@ class SystemMode(QObject):
             self.logger.error(f"Failed to abort: {e}")
             self.error_occurred.emit(f"Abort failed: {e}")
             return False
-
-    # WiFi/Adhoc mode functionality disabled for now
-    # def handle_wifi_mode_button(self) -> str:
-    #     """
-    #     Handle WiFi/Adhoc mode toggle button (DISABLED)
-    #     Future: Will send SSH command to Pi to switch network modes
-    #     """
-    #     pass
 
     def handle_shutdown_pi_button(self) -> bool:
         """
@@ -1266,37 +967,207 @@ class SystemMode(QObject):
             bool: True if shutdown command sent successfully
         """
         try:
-            if self.use_professional_mqtt and self.is_professional_mqtt_connected:
-                shutdown_command = {
-                    'type': 'system_command',
-                    'command': 'shutdown',
-                    'timestamp': self._get_timestamp(),
-                    'parameters': {
-                        'delay_seconds': 10,  # Give time for acknowledgment
-                        'reason': 'User requested shutdown'
-                    }
-                }
+            if self.is_hardware_mode() and self.ssh_connection:
+                command = "sudo shutdown -h now"
 
-                success = self.professional_mqtt_client.publish(
-                    self.professional_mqtt_config['topics']['command'],
-                    json.dumps(shutdown_command),
-                    qos=2
-                )
+                try:
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    # Don't wait for exit status as the Pi will shut down
 
-                if success:
-                    self.logger.info("Pi shutdown command sent via MQTT")
-                else:
-                    self.logger.error("Failed to send Pi shutdown command")
-
-                return success
+                    self.logger.info("Pi shutdown command sent via SSH")
+                    return True
+                except Exception as e:
+                    self.logger.error(f"Failed to send Pi shutdown command: {e}")
+                    return False
             else:
-                self.error_occurred.emit("MQTT not connected - cannot send shutdown command")
+                self.error_occurred.emit("SSH not connected - cannot send shutdown command")
                 return False
 
         except Exception as e:
             self.logger.error(f"Failed to send shutdown command: {e}")
             self.error_occurred.emit(f"Pi shutdown failed: {e}")
             return False
+
+    def handle_wifi_mode_button(self) -> bool:
+        """
+        Handle WiFi Mode button click
+        Switches the Raspberry Pi to WiFi mode
+
+        Returns:
+            bool: True if command sent successfully
+        """
+        try:
+            if self.is_hardware_mode() and self.ssh_connection:
+                # First check current mode
+                command = "python3 /home/pi/get_network_status.py"
+
+                try:
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        try:
+                            import json
+                            status = json.loads(output)
+                            current_mode = status.get('mode', 'unknown')
+
+                            if current_mode == 'wifi':
+                                self.logger.info("Already in WiFi mode")
+                                self.message_received.emit("network_status", "Already in WiFi mode")
+                                return True
+                        except Exception as json_e:
+                            self.logger.error(f"Error parsing network status: {json_e}")
+
+                    # Send command to switch to WiFi mode
+                    self.logger.info("Switching to WiFi mode...")
+                    self.message_received.emit("network_status", "Switching to WiFi mode...")
+
+                    switch_command = "sudo python3 /home/pi/switch_wifi_mode.py --mode=wifi"
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"WiFi mode switch successful: {output}")
+                        self.message_received.emit("network_status", "Successfully switched to WiFi mode")
+
+                        # Update hardware status
+                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
+                        return True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to switch to WiFi mode: {error}")
+                        self.error_occurred.emit(f"Failed to switch to WiFi mode: {error}")
+                        return False
+                except Exception as e:
+                    self.logger.error(f"Error sending WiFi mode command: {e}")
+                    self.error_occurred.emit(f"WiFi mode switch failed: {e}")
+                    return False
+            else:
+                self.error_occurred.emit("SSH not connected - cannot switch network mode")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle WiFi mode button: {e}")
+            self.error_occurred.emit(f"WiFi mode switch failed: {e}")
+            return False
+
+    def handle_adhoc_mode_button(self) -> bool:
+        """
+        Handle Adhoc Mode button click
+        Switches the Raspberry Pi to Adhoc mode
+
+        Returns:
+            bool: True if command sent successfully
+        """
+        try:
+            if self.is_hardware_mode() and self.ssh_connection:
+                # First check current mode
+                command = "python3 /home/pi/get_network_status.py"
+
+                try:
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        try:
+                            import json
+                            status = json.loads(output)
+                            current_mode = status.get('mode', 'unknown')
+
+                            if current_mode == 'adhoc':
+                                self.logger.info("Already in Adhoc mode")
+                                self.message_received.emit("network_status", "Already in Adhoc mode")
+                                return True
+                        except Exception as json_e:
+                            self.logger.error(f"Error parsing network status: {json_e}")
+
+                    # Send command to switch to Adhoc mode
+                    self.logger.info("Switching to Adhoc mode...")
+                    self.message_received.emit("network_status", "Switching to Adhoc mode...")
+
+                    switch_command = "sudo python3 /home/pi/switch_wifi_mode.py --mode=adhoc"
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"Adhoc mode switch successful: {output}")
+                        self.message_received.emit("network_status", "Successfully switched to Adhoc mode")
+
+                        # Update hardware status
+                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
+                        return True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to switch to Adhoc mode: {error}")
+                        self.error_occurred.emit(f"Failed to switch to Adhoc mode: {error}")
+                        return False
+                except Exception as e:
+                    self.logger.error(f"Error sending Adhoc mode command: {e}")
+                    self.error_occurred.emit(f"Adhoc mode switch failed: {e}")
+                    return False
+            else:
+                self.error_occurred.emit("SSH not connected - cannot switch network mode")
+                return False
+
+        except Exception as e:
+            self.logger.error(f"Failed to handle Adhoc mode button: {e}")
+            self.error_occurred.emit(f"Adhoc mode switch failed: {e}")
+            return False
+
+    def get_network_status(self) -> dict:
+        """
+        Get the current network status from the Raspberry Pi
+
+        Returns:
+            dict: Network status information
+        """
+        try:
+            if not self.is_hardware_mode() or not self.ssh_connection:
+                return {
+                    'mode': 'simulation',
+                    'ip_address': 'N/A',
+                    'ssid': 'N/A',
+                    'signal': 'N/A',
+                    'timestamp': time.time()
+                }
+
+            command = "python3 /home/pi/get_network_status.py"
+
+            stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+            exit_status = stdout.channel.recv_exit_status()
+
+            if exit_status == 0:
+                output = stdout.read().decode().strip()
+                try:
+                    import json
+                    status = json.loads(output)
+                    return status
+                except Exception as json_e:
+                    self.logger.error(f"Error parsing network status: {json_e}")
+                    return {
+                        'mode': 'unknown',
+                        'error': f"Parse error: {str(json_e)}",
+                        'timestamp': time.time()
+                    }
+            else:
+                error = stderr.read().decode().strip()
+                self.logger.error(f"Failed to get network status: {error}")
+                return {
+                    'mode': 'unknown',
+                    'error': error,
+                    'timestamp': time.time()
+                }
+        except Exception as e:
+            self.logger.error(f"Error getting network status: {e}")
+            return {
+                'mode': 'unknown',
+                'error': str(e),
+                'timestamp': time.time()
+            }
 
     # Event handlers for GPIO and show execution signals
 
@@ -1353,13 +1224,11 @@ class SystemMode(QObject):
 
     def get_comprehensive_system_status(self) -> Dict[str, Any]:
         """
-        Get comprehensive system status including GPIO and show execution
+        Get comprehensive system status including GPIO, show execution, and network status
 
         Returns:
             dict: Complete system status
         """
-        base_status = self.get_professional_mqtt_status()
-
         # Add GPIO status
         gpio_status = self.gpio_controller.get_system_status()
 
@@ -1367,8 +1236,10 @@ class SystemMode(QObject):
         show_progress = self.show_execution_manager.get_show_progress()
         show_summary = self.show_execution_manager.get_execution_summary()
 
+        # Add network status
+        network_status = self.get_network_status()
+
         return {
-            'mqtt': base_status,
             'gpio': gpio_status,
             'show_execution': {
                 'progress': {
@@ -1382,6 +1253,7 @@ class SystemMode(QObject):
                 },
                 'summary': show_summary
             },
+            'network': network_status,
             'system_capabilities': {
                 'max_cues': 1000,
                 'max_outputs': 1000,
@@ -1391,3 +1263,8 @@ class SystemMode(QObject):
             },
             'timestamp': self._get_timestamp()
         }
+
+    def _get_timestamp(self) -> str:
+        """Get current timestamp"""
+        from datetime import datetime
+        return datetime.now().isoformat()
