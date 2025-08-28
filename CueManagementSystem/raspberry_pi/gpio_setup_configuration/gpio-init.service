@@ -1,0 +1,13 @@
+[Unit]
+Description=GPIO Pin Initialization Service
+After=multi-user.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /home/pi/gpio_init.py
+RemainAfterExit=yes
+User=root
+Group=root
+
+[Install]
+WantedBy=multi-user.target
