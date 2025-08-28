@@ -1,4 +1,7 @@
-# Cue Management System Architecture
+# CueManagementSystem
+Firework Show Manager
+
+## Cue Management System Architecture
 
 This document explains the proposed 3-layer architecture for the Cue Management System.
 
@@ -12,8 +15,6 @@ The Models Layer is responsible for data management and business logic. Moving c
 - **Single Source of Truth**: All components access cue data through the model, avoiding inconsistencies
 
 Current implementation has cue data scattered across multiple files (main_window.py, cue_table.py, etc.). Moving this to a dedicated model class creates a central place for managing all cue-related data.
-
-Example model structure:
 
 ## Audio Analysis Features
 
