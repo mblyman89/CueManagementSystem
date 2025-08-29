@@ -178,7 +178,11 @@ class WaveformAnalyzer(QObject):
 
             # Check if this is a drum stem
             file_path_str = str(file_path).lower()
-            self.is_drum_stem = 'drum' in file_path_str or '/drums.' in file_path_str or '\\drums.' in file_path_str
+            self.is_drum_stem = ('drum' in file_path_str or
+                                 '/drums.' in file_path_str or
+                                 '\\drums.' in file_path_str or
+                                 'drum.wav' in file_path_str or
+                                 'drums.wav' in file_path_str)
 
             if self.is_drum_stem:
                 logger.info("Detected drum stem file - will optimize analysis for drum patterns")
@@ -209,6 +213,23 @@ class WaveformAnalyzer(QObject):
 
             logger.info(f"File loaded successfully: {os.path.basename(file_path)}")
             logger.info(f"Sample rate: {sample_rate} Hz, Channels: {self.channels}, Duration: {self.duration:.2f}s")
+
+            # IMPORTANT: Force the music_file_info path to match the actual loaded file
+            # This ensures that the waveform widget displays the correct file
+            try:
+                from PySide6.QtCore import QCoreApplication
+                app = QCoreApplication.instance()
+                if app:
+                    for widget in app.topLevelWidgets():
+                        if hasattr(widget, 'music_file_info') and widget.music_file_info:
+                            if 'path' in widget.music_file_info:
+                                # Only update if this is a drum stem and the paths don't match
+                                if self.is_drum_stem and widget.music_file_info['path'] != file_path:
+                                    logger.info(
+                                        f"Updating music_file_info path from {widget.music_file_info['path']} to {file_path}")
+                                    widget.music_file_info['path'] = file_path
+            except Exception as e:
+                logger.warning(f"Error updating music_file_info path: {str(e)}")
 
             return True
 
