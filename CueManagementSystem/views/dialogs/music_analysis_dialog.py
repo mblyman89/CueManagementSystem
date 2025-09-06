@@ -61,7 +61,7 @@ class MusicAnalysisDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Music Analysis with Audio Separation")
         self.setMinimumWidth(700)
-        self.setMinimumHeight(500)
+        self.setMinimumHeight(781)
 
         # Keep dialog on top of main window
         self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
@@ -315,6 +315,22 @@ class MusicAnalysisDialog(QDialog):
         """)
         cancel_btn.clicked.connect(self.reject)
 
+        # Load Drum Stem button
+        self.load_drum_btn = QPushButton("Load Drum Stem")
+        self.load_drum_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border-radius: 5px;
+                padding: 10px 20px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2ecc71;
+            }
+        """)
+        self.load_drum_btn.clicked.connect(self.load_drum_stem)
+
         # Analyze button
         self.analyze_btn = QPushButton("Start Analysis")
         self.analyze_btn.setEnabled(False)
@@ -337,6 +353,7 @@ class MusicAnalysisDialog(QDialog):
 
         button_layout.addWidget(cancel_btn)
         button_layout.addStretch()
+        button_layout.addWidget(self.load_drum_btn)
         button_layout.addWidget(self.analyze_btn)
 
         layout.addLayout(button_layout)
@@ -681,6 +698,42 @@ class MusicAnalysisDialog(QDialog):
             i += 1
 
         return f"{size_bytes:.1f} {units[i]}"
+
+    def load_drum_stem(self):
+        """Allow direct loading of a drum stem file for waveform analysis"""
+        print("🥁 Opening drum stem file selection dialog")
+
+        file_path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select Drum Stem File",
+            "",
+            "WAV Files (*.wav);;All Audio Files (*.wav *.mp3 *.flac *.m4a)"
+        )
+
+        if file_path:
+            # Validate file
+            valid, message = validate_audio_file(file_path)
+            if not valid:
+                QMessageBox.warning(self, "Invalid File", f"File validation failed:\n{message}")
+                return
+
+            try:
+                print(f"🥁 Loading drum stem file: {os.path.basename(file_path)}")
+
+                # Get file info
+                file_info = self.get_wav_file_info(file_path)
+
+                # Create a modified file info dictionary specifically for drum stem
+                drum_file_info = file_info.copy()
+                drum_file_info['is_drum_stem'] = True
+                drum_file_info['filename'] = f"Drum Stem - {file_info['filename']}"
+
+                # Open the waveform analysis dialog with the drum stem file
+                self._open_waveform_analysis_dialog(file_path, drum_file_info)
+
+            except Exception as e:
+                QMessageBox.warning(self, "File Error", f"Error reading drum stem file: {str(e)}")
+                print(f"Error reading drum stem file: {str(e)}")
 
     def closeEvent(self, event):
         """Handle dialog close event"""

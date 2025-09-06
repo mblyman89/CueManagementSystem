@@ -87,7 +87,42 @@ class ShowManager:
                 return  # User cancelled
 
             with open(filepath, 'r') as f:
-                cue_dicts = json.load(f)
+                json_data = json.load(f)
+
+            # Check if the JSON data is already in the expected format (array of cue dictionaries)
+            # or if it's in the customized format with nested structure
+            cue_dicts = []
+            if isinstance(json_data, list):
+                # Standard format - already a list of cue dictionaries
+                cue_dicts = json_data
+            elif isinstance(json_data, dict):
+                # Customized format - need to extract cues from the nested structure
+                # Check if it has analyzer_state with detected_peaks
+                if "analyzer_state" in json_data and "detected_peaks" in json_data["analyzer_state"]:
+                    # Extract cues from detected_peaks
+                    for peak in json_data["analyzer_state"]["detected_peaks"]:
+                        cue_dict = {
+                            "cue_number": len(cue_dicts) + 1,  # Generate sequential cue numbers
+                            "cue_type": "SINGLE SHOT",
+                            "outputs": str(len(cue_dicts) + 1),  # Use cue number as output
+                            "delay": 0.0,
+                            "execute_time": f"{int(peak['time'] // 60):02d}:{peak['time'] % 60:g}"
+                        }
+                        cue_dicts.append(cue_dict)
+                # Check if it has generator_state with manual_peaks_data
+                elif "generator_state" in json_data and "waveform_state" in json_data["generator_state"] and "manual_peaks_data" in json_data["generator_state"]["waveform_state"]:
+                    # Extract cues from manual_peaks_data
+                    for i, peak in enumerate(json_data["generator_state"]["waveform_state"]["manual_peaks_data"]):
+                        cue_dict = {
+                            "cue_number": i + 1,
+                            "cue_type": "SINGLE SHOT",
+                            "outputs": str(i + 1),
+                            "delay": 0.0,
+                            "execute_time": f"{int(peak['time'] // 60):02d}:{peak['time'] % 60:g}"
+                        }
+                        cue_dicts.append(cue_dict)
+                else:
+                    raise ValueError("Unsupported JSON format: Cannot find cue data in the file")
 
             # Convert dictionary data back to list format
             cues = []

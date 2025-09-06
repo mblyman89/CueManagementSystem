@@ -8,7 +8,7 @@ from waveform analysis, with support for random and sequential distribution meth
 import random
 import json
 import os
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Optional, Tuple, Union
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -26,21 +26,28 @@ class GeneratedCue:
     """Represents a generated cue with all necessary data"""
     cue_number: int
     cue_type: str
-    output: int
+    output: Union[int, List[int]]  # Can be a single int or a list of ints for DOUBLE SHOT
     delay: float
     execute_time: float
 
     def to_table_format(self) -> List[Any]:
         """Convert to format expected by cue table"""
-        # Format execute_time as MM:SS.SSSS
+        # Format execute_time as MM:SS.SSSSSSSS (preserving all decimal places)
         minutes = int(self.execute_time // 60)
         seconds = self.execute_time % 60
-        formatted_time = f"{minutes:02d}:{seconds:07.4f}"
+        # Use 'g' format to preserve all decimal places without rounding
+        formatted_time = f"{minutes:02d}:{seconds:g}"
+
+        # Format output based on type
+        if isinstance(self.output, list):
+            output_str = ", ".join(str(o) for o in self.output)
+        else:
+            output_str = str(self.output)
 
         return [
             self.cue_number,
             self.cue_type,
-            str(self.output),  # Single output for SINGLE SHOT
+            output_str,  # Can be multiple outputs for DOUBLE SHOT
             self.delay,
             formatted_time
         ]
@@ -437,16 +444,13 @@ class MusicalGenerator(QWidget):
         time_offset_seconds = time_offset_ms / 1000.0
 
         # Generate output assignments (ensures uniqueness and limits)
-        output_assignments = self._generate_output_assignments(len(peaks), distribution_method)
+        # Pass the peaks to the output assignment method so it can handle double shot cues
+        output_assignments = self._generate_output_assignments(len(peaks), distribution_method, peaks)
 
         # Validate that we have the right number of assignments
         if len(output_assignments) != len(peaks):
             raise ValueError(
                 f"Output assignment mismatch: {len(output_assignments)} assignments for {len(peaks)} peaks")
-
-        # Validate uniqueness of outputs
-        if len(set(output_assignments)) != len(output_assignments):
-            raise ValueError("Duplicate output assignments detected - each output must be unique")
 
         # Create cues
         cues = []
@@ -457,10 +461,13 @@ class MusicalGenerator(QWidget):
             # Ensure execute time is not negative
             execute_time = max(0.0, execute_time)
 
+            # Determine cue type based on double shot flag
+            cue_type = "DOUBLE SHOT" if peak.get('is_double_shot', False) else "SINGLE SHOT"
+
             cue = GeneratedCue(
                 cue_number=i + 1,  # Start from 1
-                cue_type="SINGLE SHOT",
-                output=output,
+                cue_type=cue_type,
+                output=output,  # This can now be either an int or a list of ints
                 delay=0.0,  # Single shot cues have no delay
                 execute_time=execute_time
             )
@@ -535,10 +542,17 @@ class MusicalGenerator(QWidget):
                     print(f"🔧 WARNING: Peak {i} has invalid time {peak.time}, skipping")
                     continue
 
+                # Check if this peak is marked as a double shot
+                is_double_shot = False
+                if self.waveform_view and hasattr(self.waveform_view, 'double_shot_peaks'):
+                    # Use peak's time value as the identifier
+                    is_double_shot = peak.time in self.waveform_view.double_shot_peaks
+
                 peak_data = {
                     'time': float(peak.time),  # Ensure it's a float
                     'amplitude': float(peak.amplitude),  # Ensure it's a float
-                    'type': 'detected'
+                    'type': 'detected',
+                    'is_double_shot': is_double_shot  # Add double shot flag
                 }
                 peaks.append(peak_data)
 
@@ -607,10 +621,18 @@ class MusicalGenerator(QWidget):
                     time_seconds = getattr(peak, 'time', 0)
                     print(f"🔧 Manual peak {i}: using time attribute={time_seconds}s")
 
+                # Check if this manual peak is marked as double shot
+                is_double_shot = False
+                if hasattr(self.waveform_view, 'double_shot_peaks'):
+                    # Use peak's time value as the identifier
+                    manual_peak_id = f"m{time_seconds}"
+                    is_double_shot = manual_peak_id in self.waveform_view.double_shot_peaks
+
                 peak_data = {
                     'time': time_seconds,
                     'amplitude': getattr(peak, 'amplitude', 0.5),
-                    'type': 'manual'
+                    'type': 'manual',
+                    'is_double_shot': is_double_shot  # Add double shot flag
                 }
                 peaks.append(peak_data)
 
@@ -621,29 +643,63 @@ class MusicalGenerator(QWidget):
             print(f"Error getting manual peaks: {e}")
             return []
 
-    def _generate_output_assignments(self, num_peaks: int, method: str) -> List[int]:
-        """Generate output assignments based on distribution method"""
-        # Enforce 1000 cue limit
-        if num_peaks > 1000:
-            raise ValueError(f"Cannot generate {num_peaks} cues. Maximum limit is 1000 cues.")
+    def _generate_output_assignments(self, num_peaks: int, method: str, peaks: List[Dict[str, Any]]) -> List[Union[int, List[int]]]:
+        """
+        Generate output assignments based on distribution method
+
+        Args:
+            num_peaks: Number of peaks to assign outputs to
+            method: Distribution method ("Random" or "Sequential")
+            peaks: List of peak data dictionaries
+
+        Returns:
+            List of output assignments (int for single shot, list of ints for double shot)
+        """
+        # Count how many double shot peaks we have
+        double_shot_count = sum(1 for peak in peaks if peak.get('is_double_shot', False))
+        single_shot_count = num_peaks - double_shot_count
+
+        # Calculate total outputs needed (1 per single shot, 2 per double shot)
+        total_outputs_needed = single_shot_count + (double_shot_count * 2)
 
         # Enforce 1000 output limit
-        max_available_outputs = min(num_peaks, 1000)
+        if total_outputs_needed > 1000:
+            raise ValueError(f"Cannot generate cues requiring {total_outputs_needed} outputs. Maximum limit is 1000 outputs total.")
 
+        # Generate the base output numbers
         if method == "Random":
-            # Random distribution from 1 to N (where N = num_peaks)
-            # Each output used exactly once - no duplicates
-            available_outputs = list(range(1, max_available_outputs + 1))
+            # Random distribution from 1 to N (where N = total_outputs_needed)
+            available_outputs = list(range(1, total_outputs_needed + 1))
             random.shuffle(available_outputs)
-            return available_outputs[:num_peaks]
+        else:  # Sequential or default
+            # Sequential distribution from 1 to N
+            available_outputs = list(range(1, total_outputs_needed + 1))
 
-        elif method == "Sequential":
-            # Sequential distribution from 1 to N, no wrapping, max 1000
-            return list(range(1, min(num_peaks + 1, 1001)))
+        # Assign outputs to peaks
+        assignments = []
+        output_index = 0
 
-        else:
-            # Default to sequential
-            return list(range(1, min(num_peaks + 1, 1001)))
+        for peak in peaks:
+            if peak.get('is_double_shot', False):
+                # Double shot gets two consecutive outputs
+                if output_index + 1 < len(available_outputs):
+                    # Assign two outputs
+                    assignments.append([available_outputs[output_index], available_outputs[output_index + 1]])
+                    output_index += 2
+                else:
+                    # Not enough outputs left, fallback to single output
+                    assignments.append(available_outputs[output_index])
+                    output_index += 1
+            else:
+                # Single shot gets one output
+                assignments.append(available_outputs[output_index])
+                output_index += 1
+
+            # Safety check to prevent index out of range
+            if output_index >= len(available_outputs):
+                break
+
+        return assignments
 
     def _clear_cue_table(self):
         """Clear existing cues from the cue table"""
@@ -810,6 +866,15 @@ class MusicalGenerator(QWidget):
             'manual_peak_count': self._get_manual_peak_count()
         }
 
+        # Add double shot mode and peaks if available
+        if self.waveform_view:
+            if hasattr(self.waveform_view, 'double_shot_mode'):
+                waveform_state['double_shot_mode'] = self.waveform_view.double_shot_mode
+
+            if hasattr(self.waveform_view, 'double_shot_peaks'):
+                # Convert set to list for JSON serialization
+                waveform_state['double_shot_peaks'] = list(self.waveform_view.double_shot_peaks)
+
         # Add analyzer info if available
         if self.analyzer:
             try:
@@ -955,6 +1020,16 @@ class MusicalGenerator(QWidget):
                 except Exception as e:
                     print(f"   ⚠️  Failed to restore peak {peak_data}: {e}")
                     continue
+
+            # Restore double shot mode and peaks if available
+            if hasattr(self.waveform_view, 'set_double_shot_mode') and 'double_shot_mode' in waveform_state:
+                self.waveform_view.set_double_shot_mode(waveform_state['double_shot_mode'])
+                print(f"🔧 Restored double shot mode: {waveform_state['double_shot_mode']}")
+
+            if hasattr(self.waveform_view, 'double_shot_peaks') and 'double_shot_peaks' in waveform_state:
+                # Convert list back to set
+                self.waveform_view.double_shot_peaks = set(waveform_state['double_shot_peaks'])
+                print(f"🔧 Restored {len(self.waveform_view.double_shot_peaks)} double shot peaks")
 
             if restored_count > 0:
                 # Trigger widget update to show the peaks

@@ -74,6 +74,9 @@ class WaveformAnalysisDialog(QDialog):
         """
         super().__init__(parent)
         self.setWindowTitle("Optimized Waveform Analysis")
+        # Set window flags to include minimize button and ensure it's functional
+        # Also keep dialog on top of main window for consistency with music_analysis_dialog
+        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
         print(f"🎛️ Initializing OptimizedWaveformAnalysisDialog")
 
         # Store music file information and references
@@ -402,6 +405,16 @@ class WaveformAnalysisDialog(QDialog):
             self.waveform_view.update()
 
         self.logger.info(f"Manual peak placement mode: {'enabled' if checked else 'disabled'}")
+
+    def _on_double_shot_mode_changed(self, checked: bool):
+        """Handle Double Shot Mode checkbox toggle."""
+        if hasattr(self.waveform_view, 'set_double_shot_mode'):
+            self.waveform_view.set_double_shot_mode(checked)
+
+            # Update the waveform display
+            self.waveform_view.update()
+
+        self.logger.info(f"Double shot mode: {'enabled' if checked else 'disabled'}")
 
     def _on_analyze_file(self):
         """Handle ANALYZE FILE button click to trigger comprehensive drum analysis."""
@@ -793,6 +806,11 @@ class WaveformAnalysisDialog(QDialog):
 
             # Add detailed peak information with timestamps
             for i, peak in enumerate(peaks):
+                # Check if this peak is marked as a double shot
+                is_double_shot = False
+                if hasattr(self.waveform_view, 'double_shot_peaks'):
+                    is_double_shot = i in self.waveform_view.double_shot_peaks
+
                 peak_info = {
                     'index': i,
                     'time_seconds': clean_data_for_json(peak.time),
@@ -804,7 +822,8 @@ class WaveformAnalysisDialog(QDialog):
                     'drum_type': str(peak.drum_type),
                     'confidence': clean_data_for_json(peak.confidence),
                     'segment': clean_data_for_json(peak.segment),
-                    'spectral_features': clean_data_for_json(peak.spectral_features)
+                    'spectral_features': clean_data_for_json(peak.spectral_features),
+                    'is_double_shot': is_double_shot  # Add double shot flag
                 }
                 timestamp_data['peaks'].append(peak_info)
 
@@ -926,7 +945,7 @@ class WaveformAnalysisDialog(QDialog):
         speed_layout.addWidget(QLabel("Speed:"))
 
         self.speed_combo = QComboBox()
-        self.speed_combo.addItems(["0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
+        self.speed_combo.addItems(["0.05x", "0.1x", "0.25x", "0.5x", "0.75x", "1.0x", "1.25x", "1.5x", "2.0x"])
         self.speed_combo.setCurrentText("1.0x")
         self.speed_combo.setToolTip("Adjust playback speed")
         speed_layout.addWidget(self.speed_combo)
@@ -1048,6 +1067,7 @@ class WaveformAnalysisDialog(QDialog):
             # Connect beat detection signals
             self.waveform_controls_panel.analyze_file_requested.connect(self._on_analyze_file)
             self.waveform_controls_panel.manual_peak_mode_changed.connect(self._on_manual_peak_mode_changed)
+            self.waveform_controls_panel.double_shot_mode_changed.connect(self._on_double_shot_mode_changed)
             self.waveform_controls_panel.cleanup_filter_requested.connect(self._apply_cleanup_filter)
             self.waveform_controls_panel.restore_peaks_requested.connect(self._restore_original_peaks)
 
@@ -1545,8 +1565,10 @@ class WaveformAnalysisDialog(QDialog):
             'zoom_factor': clean_data_for_json(getattr(self.waveform_view, 'zoom_factor', 1.0)),
             'offset': clean_data_for_json(getattr(self.waveform_view, 'offset', 0.0)),
             'manual_peak_mode': bool(getattr(self.waveform_view, 'manual_peak_mode', False)),
+            'double_shot_mode': bool(getattr(self.waveform_view, 'double_shot_mode', False)),
             'show_analyzer_peaks': bool(getattr(self.waveform_view, 'show_analyzer_peaks', True)),
-            'hidden_detected_peaks': list(getattr(self.waveform_view, 'hidden_detected_peaks', set()))
+            'hidden_detected_peaks': list(getattr(self.waveform_view, 'hidden_detected_peaks', set())),
+            'double_shot_peaks': list(getattr(self.waveform_view, 'double_shot_peaks', set()))
         }
 
         # Save manual peaks
@@ -1642,6 +1664,25 @@ class WaveformAnalysisDialog(QDialog):
         if 'config' in analyzer_state and hasattr(self.analyzer, 'config'):
             self.analyzer.config.update(analyzer_state['config'])
 
+        # Restore detected peaks if available
+        if 'detected_peaks' in analyzer_state and hasattr(self.analyzer, 'peaks'):
+            from utils.audio.waveform_analyzer import Peak
+
+            restored_peaks = []
+            for peak_data in analyzer_state['detected_peaks']:
+                peak = Peak(
+                    time=peak_data.get('time', 0),
+                    amplitude=peak_data.get('amplitude', 1.0),
+                    confidence=peak_data.get('confidence', 1.0),
+                    type=peak_data.get('drum_type', 'generic'),
+                    frequency=peak_data.get('frequency', 0.0),
+                    segment=peak_data.get('segment', 'medium')
+                )
+                restored_peaks.append(peak)
+
+            self.analyzer.peaks = restored_peaks
+            self.analyzer.is_analyzed = True
+
     def _apply_waveform_view_state(self, view_state: dict):
         """Apply waveform view state data"""
         if not self.waveform_view:
@@ -1662,6 +1703,12 @@ class WaveformAnalysisDialog(QDialog):
 
         if 'hidden_detected_peaks' in view_state:
             self.waveform_view.hidden_detected_peaks = set(view_state['hidden_detected_peaks'])
+
+        if 'double_shot_mode' in view_state:
+            self.waveform_view.double_shot_mode = view_state['double_shot_mode']
+
+        if 'double_shot_peaks' in view_state:
+            self.waveform_view.double_shot_peaks = set(view_state['double_shot_peaks'])
 
         # Restore manual peaks
         if 'manual_peaks' in view_state:
@@ -1685,6 +1732,16 @@ class WaveformAnalysisDialog(QDialog):
                 manual_peaks.append(peak)
 
             self.waveform_view.manual_peaks = manual_peaks
+
+        # Update the waveform controls panel to reflect the view state
+        if hasattr(self, 'waveform_controls_panel'):
+            # Update manual peak checkbox if available
+            if hasattr(self.waveform_controls_panel, 'manual_peak_checkbox') and 'manual_peak_mode' in view_state:
+                self.waveform_controls_panel.manual_peak_checkbox.setChecked(view_state['manual_peak_mode'])
+
+            # Update double shot checkbox if available
+            if hasattr(self.waveform_controls_panel, 'double_shot_checkbox') and 'double_shot_mode' in view_state:
+                self.waveform_controls_panel.double_shot_checkbox.setChecked(view_state['double_shot_mode'])
 
         # Update the view
         self.waveform_view.update()
@@ -2965,9 +3022,9 @@ class WaveformAnalysisDialog(QDialog):
             self._update_duration_display()
             self._force_peak_display()
 
-    @Slot()
+    @Slot(bool)
     @profile_method("_update_after_peak_detection")
-    def _update_after_peak_detection(self) -> None:
+    def _update_after_peak_detection(self, success: bool = True) -> None:
         """OPTIMIZED: Update UI after peak detection completes with performance improvements"""
         print("🎨 Updating UI after optimized peak detection completion")
         ui_update_start = time.time()
@@ -3237,4 +3294,3 @@ class WaveformAnalysisDialog(QDialog):
         # This would typically show in a status bar or temporary label
         # For now, just log it
         self.logger.info(f"Status: {message}")
-

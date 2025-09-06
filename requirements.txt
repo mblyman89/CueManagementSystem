@@ -1,0 +1,61 @@
+# Firework Cue Management System - Requirements
+# This file contains all dependencies required to run the Cue Management System
+
+# Core GUI Framework
+PySide6>=6.5.0
+
+# Audio Processing & Analysis
+librosa>=0.10.1
+numpy>=1.24.0
+scipy>=1.10.0
+soundfile>=0.12.1
+audioread>=3.0.0
+
+# Data Visualization & Plotting
+matplotlib>=3.7.0
+cycler>=0.11.0
+kiwisolver>=1.4.0
+pyparsing>=3.0.0
+python-dateutil>=2.8.2
+
+# Image Processing
+Pillow>=10.0.0
+
+# Networking
+asyncssh>=2.13.0
+pyOpenSSL>=23.0.0
+
+# Hardware Control (Raspberry Pi)
+# Note: These are only needed when running on Raspberry Pi hardware
+# RPi.GPIO>=0.7.1; platform_machine=="armv7l" or platform_machine=="aarch64"
+# gpiozero>=1.6.2; platform_machine=="armv7l" or platform_machine=="aarch64"
+
+# System Monitoring & Performance
+psutil>=5.9.0
+
+# Utility Libraries
+dataclasses-json>=0.6.0
+tqdm>=4.65.0
+configparser>=5.3.0
+jsonschema>=4.17.0
+
+# Optional Enhancements
+orjson>=3.9.0
+
+# Platform-Specific Requirements
+# Windows-specific audio backend
+pyaudio>=0.2.11; platform_system=="Windows"
+
+# macOS-specific requirements
+pyobjc-framework-Cocoa>=9.0; platform_system=="Darwin"
+
+# Linux-specific audio requirements
+# python-alsa>=1.2.7; platform_system=="Linux"
+
+# Note: Spleeter is installed in a separate environment
+# To install Spleeter:
+# conda create -n spleeter_env python=3.8
+# conda activate spleeter_env
+# pip install spleeter
+
+# Python Version Compatibility: Requires Python 3.8 or higher

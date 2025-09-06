@@ -36,6 +36,7 @@ class WaveformControlsPanel(QWidget):
     # Beat Detection Signals
     analyze_file_requested = Signal()
     manual_peak_mode_changed = Signal(bool)
+    double_shot_mode_changed = Signal(bool)
     cleanup_filter_requested = Signal()
     restore_peaks_requested = Signal()
 
@@ -294,6 +295,11 @@ class WaveformControlsPanel(QWidget):
             self.manual_peak_checkbox.toggled.connect(self._on_manual_peak_toggled)
             # Keep stateChanged as backup
             self.manual_peak_checkbox.stateChanged.connect(self._on_manual_peak_changed)
+        if hasattr(self, 'double_shot_checkbox'):
+            # Connect double shot checkbox
+            self.double_shot_checkbox.toggled.connect(self._on_double_shot_toggled)
+            # Keep stateChanged as backup
+            self.double_shot_checkbox.stateChanged.connect(self._on_double_shot_changed)
         if hasattr(self, 'cleanup_filter_btn'):
             self.cleanup_filter_btn.clicked.connect(self.cleanup_filter_requested.emit)
         if hasattr(self, 'restore_peaks_btn'):
@@ -697,7 +703,7 @@ class WaveformControlsPanel(QWidget):
         # Add small spacing between buttons and checkbox
         main_horizontal_layout.addSpacing(20)
 
-        # CHECKBOX SECTION: Manual Peak checkbox with label to the right
+        # CHECKBOX SECTION: Manual Peak and Double Shot checkboxes with labels
         checkbox_section = QHBoxLayout()
         checkbox_section.setSpacing(8)
         checkbox_section.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -722,11 +728,40 @@ class WaveformControlsPanel(QWidget):
         """)
         checkbox_section.addWidget(self.manual_peak_checkbox)
 
-        # Label to the right of checkbox
+        # Label to the right of manual checkbox
         self.manual_label = QLabel("Add Manual Peaks Disabled")
         self.manual_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db;")
         self.manual_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         checkbox_section.addWidget(self.manual_label)
+
+        # Add spacing between checkboxes
+        checkbox_section.addSpacing(20)
+
+        # Double Shot checkbox
+        self.double_shot_checkbox = QCheckBox()
+        self.double_shot_checkbox.setStyleSheet("""
+            QCheckBox::indicator {
+                width: 28px;
+                height: 28px;
+            }
+            QCheckBox::indicator:unchecked {
+                border: 2px solid #bdc3c7;
+                background-color: white;
+                border-radius: 4px;
+            }
+            QCheckBox::indicator:checked {
+                border: 2px solid #e74c3c;
+                background-color: #e74c3c;
+                border-radius: 4px;
+            }
+        """)
+        checkbox_section.addWidget(self.double_shot_checkbox)
+
+        # Label to the right of double shot checkbox
+        self.double_shot_label = QLabel("Double Shot Mode Disabled")
+        self.double_shot_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #e74c3c;")
+        self.double_shot_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        checkbox_section.addWidget(self.double_shot_label)
 
         # Add checkbox section to main layout
         main_horizontal_layout.addLayout(checkbox_section)
@@ -893,6 +928,49 @@ class WaveformControlsPanel(QWidget):
         # Emit the signal to notify other components
         print(f"🔧 Controls Panel: Emitting manual_peak_mode_changed signal via toggled with: {checked}")
         self.manual_peak_mode_changed.emit(checked)
+
+    def _on_double_shot_toggled(self, checked):
+        """Handle double shot mode checkbox toggle (more reliable signal)"""
+        print(f"🔧 Controls Panel: Double Shot toggled signal received: {checked} (type: {type(checked)})")
+
+        # Update label text based on checkbox state
+        if checked:
+            self.double_shot_label.setText("Double Shot Mode Enabled")
+            print("🔧 Controls Panel: Double Shot label updated to 'Enabled' via toggled")
+        else:
+            self.double_shot_label.setText("Double Shot Mode Disabled")
+            print("🔧 Controls Panel: Double Shot label updated to 'Disabled' via toggled")
+
+        # Emit the signal to notify other components
+        print(f"🔧 Controls Panel: Emitting double_shot_mode_changed signal via toggled with: {checked}")
+        self.double_shot_mode_changed.emit(checked)
+
+    def _on_double_shot_changed(self, state):
+        """Handle double shot mode checkbox change"""
+        # Debug logging - show raw state value
+        print(f"🔧 Controls Panel: Double Shot raw checkbox state received: {state} (type: {type(state)})")
+        print(f"🔧 Controls Panel: Qt.Checked value: {Qt.Checked}")
+        print(f"🔧 Controls Panel: Qt.Unchecked value: {Qt.Unchecked}")
+
+        # Handle both integer and Qt enum values
+        if isinstance(state, int):
+            is_checked = state == Qt.Checked.value if hasattr(Qt.Checked, 'value') else state == 2
+        else:
+            is_checked = state == Qt.Checked
+
+        print(f"🔧 Controls Panel: Double Shot checkbox changed to: {is_checked}")
+
+        # Update label text based on checkbox state
+        if is_checked:
+            self.double_shot_label.setText("Double Shot Mode Enabled")
+            print("🔧 Controls Panel: Double Shot label updated to 'Enabled'")
+        else:
+            self.double_shot_label.setText("Double Shot Mode Disabled")
+            print("🔧 Controls Panel: Double Shot label updated to 'Disabled'")
+
+        # Emit the signal to notify other components
+        print(f"🔧 Controls Panel: Emitting double_shot_mode_changed signal with: {is_checked}")
+        self.double_shot_mode_changed.emit(is_checked)
 
     def update_peak_counts(self, detected: int, custom: int, total: int):
         """Update the peak count displays"""

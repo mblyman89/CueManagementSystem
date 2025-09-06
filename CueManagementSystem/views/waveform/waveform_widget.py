@@ -181,6 +181,10 @@ class WaveformView(QWidget):
         self.show_analyzer_peaks = True  # Control visibility of analyzer-detected peaks
         self.hidden_detected_peaks = set()  # Track hidden detected peaks by index
 
+        # Double shot mode
+        self.double_shot_mode = False
+        self.double_shot_peaks = set()  # Track peaks marked as double shot by their time value
+
         # Initialize colors first to ensure they're available
         self.background_color = QColor(20, 20, 25)
         self.waveform_color = QColor(65, 175, 255)
@@ -280,8 +284,9 @@ class WaveformView(QWidget):
                 # Handle manual peak refinement mode
                 if self.manual_peak_mode:
                     # First check if clicking on existing manual peak to delete it
-                    if self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect):
-                        self._delete_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
+                        self._delete_manual_peak_at_index(manual_peak_index)
                         return
                     # Check if clicking on detected peak to hide it
                     elif self._is_detected_peak_at_position(event.position().x(), event.position().y(), content_rect):
@@ -290,6 +295,44 @@ class WaveformView(QWidget):
                     else:
                         # Add new manual peak
                         self._handle_manual_peak_placement(event, content_rect)
+                        return
+
+                # Handle double shot mode
+                elif self.double_shot_mode:
+                    # First check if clicking on a detected peak to mark it as double shot
+                    peak_index = self._is_detected_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    if peak_index is not False:  # peak_index will be False if no peak is found
+                        # Get the peak's time value to use as a unique identifier
+                        peak_time = self.visible_peaks[peak_index].time
+
+                        # Toggle double shot status for this detected peak
+                        if peak_time in self.double_shot_peaks:
+                            self.double_shot_peaks.remove(peak_time)
+                            self.logger.info(f"Removed detected peak at time {peak_time:.3f}s from double shot peaks")
+                        else:
+                            self.double_shot_peaks.add(peak_time)
+                            self.logger.info(f"Added detected peak at time {peak_time:.3f}s to double shot peaks")
+                        self.update()  # Refresh display
+                        return
+
+                    # If not a detected peak, check if it's a manual peak
+                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
+                        # Get the manual peak's time value
+                        manual_peak_time = self.manual_peaks[manual_peak_index].time
+
+                        # Create a unique identifier for manual peaks to avoid conflicts with detected peaks
+                        # Use 'm' prefix followed by the time to distinguish from detected peaks
+                        manual_peak_id = f"m{manual_peak_time}"
+
+                        # Toggle double shot status for this manual peak
+                        if manual_peak_id in self.double_shot_peaks:
+                            self.double_shot_peaks.remove(manual_peak_id)
+                            self.logger.info(f"Removed manual peak at time {manual_peak_time:.3f}s from double shot peaks")
+                        else:
+                            self.double_shot_peaks.add(manual_peak_id)
+                            self.logger.info(f"Added manual peak at time {manual_peak_time:.3f}s to double shot peaks")
+                        self.update()  # Refresh display
                         return
 
                 # Position change logic
@@ -311,9 +354,9 @@ class WaveformView(QWidget):
 
                     if peak_index is not None:
                         # Check if it's a manual peak (for deletion)
-                        if self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect):
-                            self._delete_manual_peak_at_position(event.position().x(), event.position().y(),
-                                                                 content_rect)
+                        manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                        if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
+                            self._delete_manual_peak_at_index(manual_peak_index)
                         else:
                             # Regular peak selection
                             if peak_index in self.selected_peaks:
@@ -1598,7 +1641,20 @@ class WaveformView(QWidget):
         # Center position in view if outside visible area
         visible_start = self.offset
         visible_end = self.offset + (1.0 / self.zoom_factor)
-        margin = 0.1 / self.zoom_factor
+
+        # Use a smaller margin (0.001 ms) when in playback mode
+        # Convert from milliseconds to normalized units
+        if hasattr(self, 'analyzer') and self.analyzer and self.analyzer.sample_rate:
+            # 0.001 ms = 0.000001 seconds
+            # normalized_value = seconds / total_duration
+            if hasattr(self.analyzer, 'duration') and self.analyzer.duration:
+                margin = 0.000001 / self.analyzer.duration
+            else:
+                # Fallback to the original calculation if duration is not available
+                margin = 0.1 / self.zoom_factor
+        else:
+            # Use original margin when not in playback mode or analyzer not available
+            margin = 0.1 / self.zoom_factor
 
         if (position < visible_start + margin or
                 position > visible_end - margin):
@@ -1853,6 +1909,11 @@ class WaveformView(QWidget):
         self.manual_peak_mode = enabled
         self.logger.info(f"Manual peak mode set to: {enabled}")
 
+    def set_double_shot_mode(self, enabled: bool):
+        """Enable or disable double shot mode for marking peaks as DOUBLE SHOT type"""
+        self.double_shot_mode = enabled
+        self.logger.info(f"Double shot mode set to: {enabled}")
+
     def _handle_manual_peak_placement(self, event, content_rect):
         """Handle manual peak placement when in manual mode"""
         if not self.analyzer or self.analyzer.waveform_data is None:
@@ -1890,28 +1951,14 @@ class WaveformView(QWidget):
             self.update()
 
     def _is_manual_peak_at_position(self, x, y, content_rect):
-        """Check if there's a manual peak at the given position"""
+        """Check if there's a manual peak at the given position
+
+        Returns:
+            int: The index of the manual peak if found, False otherwise
+        """
         if not self.manual_peaks:
             return False
 
-        tolerance = 10  # pixels
-
-        for peak in self.manual_peaks:
-            total_samples = len(self.analyzer.waveform_data[0])
-            samples_per_pixel = total_samples / (content_rect.width() * self.zoom_factor)
-            # Fix position calculation
-            visible_start_sample = self.offset * total_samples
-            # Peak position is already in samples, not time
-            peak_sample_index = int(peak.position)
-            peak_x = int((peak_sample_index - visible_start_sample) / samples_per_pixel)
-            peak_x_pos = content_rect.left() + peak_x
-
-            if abs(x - peak_x_pos) <= tolerance:
-                return True
-        return False
-
-    def _delete_manual_peak_at_position(self, x, y, content_rect):
-        """Delete manual peak at the given position"""
         tolerance = 10  # pixels
 
         for i, peak in enumerate(self.manual_peaks):
@@ -1925,13 +1972,25 @@ class WaveformView(QWidget):
             peak_x_pos = content_rect.left() + peak_x
 
             if abs(x - peak_x_pos) <= tolerance:
-                del self.manual_peaks[i]
-                self.logger.info(f"Deleted manual peak at position {peak.position}")
-                self.peak_selection_changed.emit()  # Emit signal to update peak count
+                return i  # Return the index of the manual peak
+        return False
 
-                # FIX: Use full update to prevent grey artifacts
-                self.update()
-                break
+    def _delete_manual_peak_at_index(self, index):
+        """Delete manual peak at the given index"""
+        if 0 <= index < len(self.manual_peaks):
+            peak = self.manual_peaks[index]
+            del self.manual_peaks[index]
+            self.logger.info(f"Deleted manual peak at position {peak.position}")
+            self.peak_selection_changed.emit()  # Emit signal to update peak count
+
+            # FIX: Use full update to prevent grey artifacts
+            self.update()
+
+    def _delete_manual_peak_at_position(self, x, y, content_rect):
+        """Delete manual peak at the given position"""
+        manual_peak_index = self._is_manual_peak_at_position(x, y, content_rect)
+        if manual_peak_index is not False:
+            self._delete_manual_peak_at_index(manual_peak_index)
 
     def _is_detected_peak_at_position(self, x, y, content_rect):
         """Check if there's a detected peak at the given position"""
@@ -2070,11 +2129,17 @@ class WaveformView(QWidget):
                 if 0 <= x <= rect.width():
                     x_pos = rect.left() + x
 
-                    # Check if peak is selected
+                    # Check if peak is selected or marked as double shot
                     is_selected = i in self.selected_peaks
+                    is_double_shot = peak.time in self.double_shot_peaks
 
                     # PROFESSIONAL PEAK MARKER DESIGN - ENHANCED
-                    if is_selected:
+                    if is_double_shot:
+                        # Double shot peak: Red with glow effect
+                        main_color = QColor(255, 0, 0, 255)  # Solid red
+                        glow_color = QColor(255, 0, 0, 120)  # Red glow
+                        line_width = 4
+                    elif is_selected:
                         # Selected peak: Gold with glow effect
                         main_color = QColor(255, 215, 0, 255)  # Solid gold
                         glow_color = QColor(255, 215, 0, 120)  # More visible glow
@@ -2161,10 +2226,20 @@ class WaveformView(QWidget):
             if 0 <= x <= rect.width():
                 x_pos = rect.left() + x
 
-                # Manual peak colors (magenta/purple)
-                main_color = QColor(255, 100, 255, 255)  # Bright magenta
-                glow_color = QColor(255, 100, 255, 100)  # Magenta glow
-                line_width = 3
+                # Check if this manual peak is marked as double shot
+                manual_peak_id = f"m{peak.time}"
+                is_double_shot = manual_peak_id in self.double_shot_peaks
+
+                if is_double_shot:
+                    # Double shot manual peak: Red with glow effect
+                    main_color = QColor(255, 0, 0, 255)  # Solid red
+                    glow_color = QColor(255, 0, 0, 120)  # Red glow
+                    line_width = 4
+                else:
+                    # Regular manual peak colors (magenta/purple)
+                    main_color = QColor(255, 100, 255, 255)  # Bright magenta
+                    glow_color = QColor(255, 100, 255, 100)  # Magenta glow
+                    line_width = 3
 
                 # Draw glow effect
                 painter.setPen(QPen(glow_color, line_width + 2))
