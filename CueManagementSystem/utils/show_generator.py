@@ -1,136 +1,166 @@
 import random
 import math
 import traceback
-from typing import List, Dict, Any, Tuple, Optional
+import time
+from typing import List, Dict, Any, Tuple, Optional, Set
 from datetime import timedelta
-from utils.show_enums import ShowSection, EffectSequence, ShowStyle, RhythmPattern, ComplexityLevel
+from PySide6.QtWidgets import QTableWidgetItem
+from CueManagementSystem.utils.show_enums import ShowSection, EffectSequence, ShowStyle, RhythmPattern, ComplexityLevel
 
 
 class ShowGenerator:
     """
-    Generator for creating random firework shows
-    Handles the creation of cues based on specified parameters
+    Generator for creating firework shows based on user parameters
+    Handles the creation of cues based on specified parameters from the dialog
     """
 
-    # Define cue types and their weights (probability of selection)
-    CUE_TYPES = {
-        "SINGLE SHOT": 65,  # 65% chance
-        "DOUBLE SHOT": 35,  # 35% chance
+    # HARDCODED CORE REQUIREMENTS FROM CSV FILES
+    # ==========================================
+
+    # DELAY BETWEEN CUES (increments of 0.25 seconds) - FROM CSV
+    DELAY_BETWEEN_CUES = {
+        "opening": {"min": 1.0, "max": 4.0, "increment": 0.25},
+        "buildup": {"min": 1.0, "max": 3.0, "increment": 0.25},
+        "false_finale": {"min": 1.0, "max": 2.0, "increment": 0.25},
+        "finale": {"min": 0.5, "max": 1.0, "increment": 0.25}
     }
 
-    # These dictionaries are no longer needed since we're only using SHOT types
-    # Kept as empty dictionaries for compatibility with existing code
-    DELAY_RANGES = {}
-    RUN_LENGTH_RANGES = {}
-
-    # Time between cues ranges (in seconds)
-    TIME_BETWEEN_CUES = {
-        "min": 1.0,  # Minimum time between cues
-        "max": 5.0,  # Maximum time between cues
-        "finale_min": 0.2,  # Minimum time during finale (last section)
-        "finale_max": 1.5  # Maximum time during finale (last section)
+    # DELAY BETWEEN OUTPUTS FOR RUN TYPES (increments of 0.125 seconds) - FROM CSV
+    RUN_DELAY_RANGES = {
+        "opening": {"min": 0.5, "max": 1.0, "increment": 0.125},
+        "buildup": {"min": 0.375, "max": 0.875, "increment": 0.125},
+        "false_finale": {"min": 0.25, "max": 0.75, "increment": 0.125},
+        "finale": {"min": 0.125, "max": 0.5, "increment": 0.125}
     }
 
-    # Time between cues for each section
-    TIME_BETWEEN_CUES = {
-        ShowSection.OPENING: {"min": 1.5, "max": 5.0},
-        ShowSection.BUILDUP: {"min": 1.2, "max": 4.0},
-        ShowSection.MAIN_BODY: {"min": 1.0, "max": 3.5},
-        ShowSection.PRE_FINALE: {"min": 0.8, "max": 2.5},
-        ShowSection.FINALE: {"min": 0.2, "max": 1.5},
+    # SINGLE RUN TYPES (# of outputs per chain per cue) - FROM CSV
+    SINGLE_RUN_OUTPUTS = {
+        "opening": {"min": 1, "max": 4},
+        "buildup": {"min": 1, "max": 6},
+        "false_finale": {"min": 1, "max": 8},
+        "finale": {"min": 1, "max": 10}
     }
 
-    # Cue type probabilities for each section
-    SECTION_CUE_TYPES = {
-        ShowSection.OPENING: {
-            "SINGLE SHOT": 70,
-            "DOUBLE SHOT": 30
+    # DOUBLE RUN TYPES (# of pairs of outputs per chain per cue) - FROM CSV
+    DOUBLE_RUN_OUTPUTS = {
+        "opening": {"min": 1, "max": 1},  # N/A - using 1 as placeholder
+        "buildup": {"min": 1, "max": 4},
+        "false_finale": {"min": 1, "max": 5},
+        "finale": {"min": 1, "max": 6}
+    }
+
+    # SPECIAL EFFECTS PATTERNS - FROM CSV
+    SPECIAL_EFFECTS_PATTERNS = {
+        "rock_ballad": {
+            "description": "Mimic the drum pattern of a rock and roll ballad",
+            "rhythm_pattern": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0],
+            "delay_pattern": [1.0, 0.5, 0.75, 0.5]
         },
-        ShowSection.BUILDUP: {
-            "SINGLE SHOT": 65,
-            "DOUBLE SHOT": 35
+        "metal_ballad": {
+            "description": "Mimic the drum pattern of a melodic metal ballad",
+            "rhythm_pattern": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0],
+            "delay_pattern": [0.5, 0.25, 0.5, 0.25]
         },
-        ShowSection.MAIN_BODY: {
-            "SINGLE SHOT": 55,
-            "DOUBLE SHOT": 45
+        "trot": {
+            "description": "Mimic the pattern of a horse trotting",
+            "rhythm_pattern": [1, 0, 1, 0, 1, 0, 1, 0],
+            "delay_pattern": [0.75, 0.75, 0.75, 0.75]
         },
-        ShowSection.PRE_FINALE: {
-            "SINGLE SHOT": 50,
-            "DOUBLE SHOT": 50
+        "gallop": {
+            "description": "Mimic the pattern of a horse galloping",
+            "rhythm_pattern": [1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0],
+            "delay_pattern": [0.25, 0.25, 0.5, 0.25, 0.25, 0.5]
         },
-        ShowSection.FINALE: {
-            "SINGLE SHOT": 45,
-            "DOUBLE SHOT": 55
+        "step": {
+            "description": "Mimic the pattern of someone taking one step at a time",
+            "rhythm_pattern": [1, 0, 0, 0, 1, 0, 0, 0],
+            "delay_pattern": [1.0, 0.5, 1.0, 0.5]
+        },
+        "chase": {
+            "description": "Simple chase pattern with consistent delays",
+            "rhythm_pattern": [1, 0, 1, 0, 1, 0, 1, 0],
+            "delay_pattern": [0.5, 0.5, 0.5, 0.5]
+        },
+        "random": {
+            "description": "Random pattern with varied delays",
+            "rhythm_pattern": None,
+            "delay_pattern": None
+        },
+        "false_finale": {
+            "description": "Short and intense burst leading audience to believe it's the true finale",
+            "rhythm_pattern": [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0],
+            "delay_pattern": [0.125, 0.125, 0.125, 0.125, 0.125, 0.5, 0.125, 0.125, 0.125, 0.125, 0.125, 0.5]
         }
     }
 
-    # These section-specific dictionaries are no longer needed for RUN types
-    # Kept as empty dictionaries for compatibility with existing code
-    DELAY_RANGES = {
-        ShowSection.OPENING: {},
-        ShowSection.BUILDUP: {},
-        ShowSection.MAIN_BODY: {},
-        ShowSection.PRE_FINALE: {},
-        ShowSection.FINALE: {}
+    # Define delay ranges for run types (in seconds)
+    RUN_DELAY_RANGES = {
+        "opening": {"min": 0.5, "max": 1.0, "increment": 0.125},
+        "buildup": {"min": 0.375, "max": 0.875, "increment": 0.125},
+        "false_finale": {"min": 0.25, "max": 0.75, "increment": 0.125},
+        "finale": {"min": 0.125, "max": 0.5, "increment": 0.125}
     }
 
-    # Run length ranges are no longer needed
-    RUN_LENGTH_RANGES = {
-        ShowSection.OPENING: {},
-        ShowSection.BUILDUP: {},
-        ShowSection.MAIN_BODY: {},
-        ShowSection.PRE_FINALE: {},
-        ShowSection.FINALE: {}
+    # Define output counts for run types
+    SINGLE_RUN_OUTPUTS = {
+        "opening": {"min": 1, "max": 4},
+        "buildup": {"min": 1, "max": 6},
+        "false_finale": {"min": 1, "max": 8},
+        "finale": {"min": 1, "max": 10}
     }
 
-    # Probability of effect sequences for each section
-    SEQUENCE_PROBABILITIES = {
-        ShowSection.OPENING: {
-            None: 70,  # 70% chance of no special effect
-            EffectSequence.FAN: 10,
-            EffectSequence.RIPPLE: 10,
-            EffectSequence.ALTERNATING: 10,
-            EffectSequence.CHASE: 0,
-            EffectSequence.SYNCHRONIZED: 0,
-            EffectSequence.CRESCENDO: 0
+    # Define output pair counts for double run types
+    DOUBLE_RUN_OUTPUTS = {
+        "opening": {"min": 1, "max": 1},  # N/A in spreadsheet, using 1 as default
+        "buildup": {"min": 1, "max": 4},
+        "false_finale": {"min": 1, "max": 5},
+        "finale": {"min": 1, "max": 6}
+    }
+
+    # Define rhythm patterns for special effects
+    RHYTHM_PATTERNS = {
+        "rock_ballad": {
+            "description": "Mimic the drum pattern of a rock and roll ballad",
+            "pattern": [1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 1, 0, 1, 0, 0, 0],  # Basic rock beat
+            "delay_multipliers": [1.0, 0.5, 0.75, 0.5]  # Varied delays for rock feel
         },
-        ShowSection.BUILDUP: {
-            None: 60,
-            EffectSequence.FAN: 10,
-            EffectSequence.RIPPLE: 10,
-            EffectSequence.ALTERNATING: 10,
-            EffectSequence.CHASE: 5,
-            EffectSequence.SYNCHRONIZED: 5,
-            EffectSequence.CRESCENDO: 0
+        "metal_ballad": {
+            "description": "Mimic the drum pattern of a melodic metal ballad",
+            "pattern": [1, 0, 1, 0, 1, 1, 0, 1, 0, 1, 0, 1, 1, 0, 1, 0],  # More intense pattern
+            "delay_multipliers": [0.5, 0.25, 0.5, 0.25]  # Faster delays for metal feel
         },
-        ShowSection.MAIN_BODY: {
-            None: 40,
-            EffectSequence.FAN: 10,
-            EffectSequence.RIPPLE: 10,
-            EffectSequence.ALTERNATING: 10,
-            EffectSequence.CHASE: 10,
-            EffectSequence.SYNCHRONIZED: 10,
-            EffectSequence.CRESCENDO: 10
+        "trot": {
+            "description": "Mimic the pattern of a horse trotting",
+            "pattern": [1, 0, 1, 0, 1, 0, 1, 0],  # Even pattern
+            "delay_multipliers": [0.75, 0.75, 0.75, 0.75]  # Consistent delays
         },
-        ShowSection.PRE_FINALE: {
-            None: 30,
-            EffectSequence.FAN: 10,
-            EffectSequence.RIPPLE: 10,
-            EffectSequence.ALTERNATING: 10,
-            EffectSequence.CHASE: 15,
-            EffectSequence.SYNCHRONIZED: 15,
-            EffectSequence.CRESCENDO: 10
+        "gallop": {
+            "description": "Mimic the pattern of a horse galloping",
+            "pattern": [1, 0, 1, 1, 0, 0, 1, 0, 1, 1, 0, 0],  # Gallop rhythm
+            "delay_multipliers": [0.25, 0.25, 0.5, 0.25, 0.25, 0.5]  # Quick triplet feel
         },
-        ShowSection.FINALE: {
-            None: 20,
-            EffectSequence.FAN: 10,
-            EffectSequence.RIPPLE: 10,
-            EffectSequence.ALTERNATING: 15,
-            EffectSequence.CHASE: 15,
-            EffectSequence.SYNCHRONIZED: 15,
-            EffectSequence.CRESCENDO: 15
+        "step": {
+            "description": "Mimic the pattern of someone taking one step at a time",
+            "pattern": [1, 0, 0, 0, 1, 0, 0, 0],  # Step pattern
+            "delay_multipliers": [1.0, 0.5, 1.0, 0.5]  # Alternating delays
+        },
+        "chase": {
+            "description": "Simple chase pattern with consistent delays",
+            "pattern": [1, 0, 1, 0, 1, 0, 1, 0],  # Even pattern
+            "delay_multipliers": [0.5, 0.5, 0.5, 0.5]  # Consistent delays
+        },
+        "random": {
+            "description": "Random pattern with varied delays",
+            "pattern": None,  # Will be generated dynamically
+            "delay_multipliers": None  # Will be generated dynamically
         }
     }
+
+    # Maximum number of generation attempts
+    MAX_GENERATION_ATTEMPTS = 5
+
+    # Maximum time to spend generating (in seconds)
+    MAX_GENERATION_TIME = 10
 
     def __init__(self):
         """Initialize the show generator"""
@@ -143,9 +173,101 @@ class ShowGenerator:
         # Used to track cue numbers
         self.current_cue_number = 1
 
+        # Store generated cues
+        self.cues = []
+
+        # Store act configuration from dialog
+        self.act_config = None
+
+        # Store whether cues should be sequential or random
+        self.sequential_cues = True
+
+        # Store all available outputs (1 to total_outputs)
+        self.all_outputs = []
+
+        # Store output allocation for each act
+        self.act_outputs = {}
+
+        # Store output allocation for each shot type within each act
+        self.shot_type_outputs = {}
+
+        # Store total outputs
+        self.total_outputs = 0
+
+        # Store total duration
+        self.total_duration = 0
+
+        # Store generation statistics
+        self.generation_attempts = 0
+        self.generation_start_time = 0
+
+        # Debug mode
+        self.debug = True
+
+        # Initialize constants as instance attributes
+        self.DELAY_BETWEEN_CUES = {
+            1: {"min": 3, "max": 5, "increment": 0.25},  # Act 1: 3-5 seconds between cues
+            2: {"min": 4, "max": 7, "increment": 0.25},  # Act 2: 4-7 seconds between cues
+            3: {"min": 2, "max": 4, "increment": 0.25},  # Act 3: 2-4 seconds between cues
+            4: {"min": 3, "max": 6, "increment": 0.25},  # Act 4: 3-6 seconds between cues
+            5: {"min": 4, "max": 8, "increment": 0.25},  # Act 5: 4-8 seconds between cues
+            "opening": {"min": 3, "max": 5, "increment": 0.25},
+            "buildup": {"min": 4, "max": 7, "increment": 0.25},
+            "false_finale": {"min": 3, "max": 5, "increment": 0.25},
+            "finale": {"min": 2, "max": 4, "increment": 0.25}
+        }
+
+        # Define delay ranges for run types (in seconds)
+        self.RUN_DELAY_RANGES = {
+            "opening": {"min": 0.5, "max": 1.0, "increment": 0.125},
+            "buildup": {"min": 0.375, "max": 0.875, "increment": 0.125},
+            "false_finale": {"min": 0.25, "max": 0.75, "increment": 0.125},
+            "finale": {"min": 0.125, "max": 0.5, "increment": 0.125}
+        }
+
+        # Define output counts for run types
+        self.SINGLE_RUN_OUTPUTS = {
+            "opening": {"min": 1, "max": 4},
+            "buildup": {"min": 1, "max": 6},
+            "false_finale": {"min": 2, "max": 8},
+            "finale": {"min": 3, "max": 10}
+        }
+
+        self.DOUBLE_RUN_OUTPUTS = {
+            "opening": {"min": 2, "max": 8},
+            "buildup": {"min": 4, "max": 12},
+            "false_finale": {"min": 6, "max": 16},
+            "finale": {"min": 8, "max": 20}
+        }
+
+        # Define rhythm patterns for special effects
+        self.RHYTHM_PATTERNS = {
+            "opening_buildup": {
+                "description": "Gradual increase in intensity to build excitement",
+                "rhythm_pattern": [1, 0, 0, 1, 0, 1, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1],
+                "delay_pattern": [0.5, 0.5, 0.5, 0.5, 0.5, 0.375, 0.375, 0.375, 0.375, 0.375, 0.25, 0.25, 0.25, 0.25,
+                                  0.125, 0.125]
+            },
+            "finale_climax": {
+                "description": "Rapid-fire sequence for maximum impact at show finale",
+                "rhythm_pattern": [1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 1, 1, 1, 1, 1],
+                "delay_pattern": [0.125, 0.125, 0.125, 0.25, 0.125, 0.125, 0.125, 0.25, 0.125, 0.125, 0.125, 0.125,
+                                  0.125, 0.125, 0.125, 0.125]
+            },
+            "false_finale": {
+                "description": "Short and intense burst leading audience to believe it's the true finale",
+                "rhythm_pattern": [1, 1, 1, 1, 1, 0, 1, 1, 1, 1, 1, 0],
+                "delay_pattern": [0.125, 0.125, 0.125, 0.125, 0.125, 0.5, 0.125, 0.125, 0.125, 0.125, 0.125, 0.5]
+            }
+        }
+
+        # Maximum attempts and time for generation
+        self.MAX_GENERATION_ATTEMPTS = 5
+        self.MAX_GENERATION_TIME = 10
+
     def generate_random_show(self, config_data) -> List[List]:
         """
-        Generate a show based on configuration data with sequential output assignment
+        Generate a show based on configuration data from the dialog
 
         Args:
             config_data: ShowConfigData instance with show parameters
@@ -153,954 +275,1597 @@ class ShowGenerator:
         Returns:
             List of formatted cues ready to be added to the cue table
         """
+        # Start generation timer
+        self.generation_start_time = time.time()
+
         # Reset state for new generation
         self.used_outputs = set()
         self.current_time_seconds = 0.0
         self.current_cue_number = 1
+        self.cues = []
+        self.generation_attempts = 0
 
         # Extract configuration parameters
-        total_duration = config_data.total_seconds
-        total_outputs = config_data.num_outputs
-        section_intensities = config_data.section_intensities
+        self.total_duration = config_data.total_seconds
+        self.total_outputs = config_data.num_outputs
 
-        # Save show sections and intensities for later use
-        self.show_sections = [ShowSection(i) for i in range(len(section_intensities))]
-        self.section_intensities = section_intensities
+        # Get act configuration
+        self.act_config = config_data.act_config
 
-        # Calculate the duration of each section
-        section_durations = self._calculate_section_durations(total_duration, section_intensities)
+        # Get cue order preference
+        self.sequential_cues = config_data.sequential_cues
 
-        # Distribute outputs to sections in sequential order
-        self.section_outputs = self._distribute_outputs_to_sections(total_outputs)
+        # Initialize all outputs
+        self.all_outputs = list(range(1, self.total_outputs + 1))
 
-        # Get the number of outputs per section
-        section_outputs = [len(self.section_outputs.get(ShowSection(i), [])) for i in range(len(section_intensities))]
+        # Log configuration for debugging
+        if self.debug:
+            print(f"Generating show with {self.total_outputs} outputs over {self.total_duration} seconds")
+            print(f"Sequential cues: {self.sequential_cues}")
 
-        # Ensure we don't exceed the total number of outputs
-        actual_outputs = sum(section_outputs)
-        if actual_outputs != total_outputs:
-            if actual_outputs > total_outputs:
-                # Scale down proportionally if we allocated too many
-                ratio = total_outputs / actual_outputs
-                section_outputs = [int(count * ratio) for count in section_outputs]
-            else:
-                # Distribute remaining outputs proportionally
-                remaining = total_outputs - actual_outputs
-                # Give priority to finale section
-                if len(section_outputs) > 0:
-                    finale_index = len(section_outputs) - 1
-                    section_outputs[finale_index] += remaining
+        # Validate act configuration
+        if not self._validate_act_configuration():
+            print("Error: Invalid act configuration")
+            return []
 
-            # Fix any rounding errors to ensure exact output count
-            diff = total_outputs - sum(section_outputs)
-            if diff > 0:
-                # Add remaining to the finale or first non-zero section
-                for i in range(len(section_outputs) - 1, -1, -1):
-                    if section_outputs[i] > 0:
-                        section_outputs[i] += diff
-                        break
-            elif diff < 0:
-                # Remove excess from sections proportionally
-                for i in range(len(section_outputs)):
-                    if section_outputs[i] > abs(diff) and section_outputs[i] > 0:
-                        section_outputs[i] += diff  # diff is negative
-                        break
+        # Allocate outputs to acts
+        self._allocate_outputs_to_acts()
 
-        # Generate cues for each section
-        all_cues = []
-        start_time = 0.0
+        # Allocate outputs to shot types within each act
+        self._allocate_outputs_to_shot_types()
 
-        for i, (duration, num_outputs) in enumerate(zip(section_durations, section_outputs)):
-            # Skip sections with no outputs
-            if num_outputs <= 0:
+        # Generate cues with multiple attempts if needed
+        best_cues = []
+        best_score = -1
+
+        while self.generation_attempts < self.MAX_GENERATION_ATTEMPTS:
+            self.generation_attempts += 1
+
+            # Check if we've exceeded the maximum generation time
+            if time.time() - self.generation_start_time > self.MAX_GENERATION_TIME:
+                if self.debug:
+                    print(f"Exceeded maximum generation time ({self.MAX_GENERATION_TIME} seconds)")
+                break
+
+            # Reset state for this attempt
+            self.used_outputs = set()  # Clear the used outputs tracking set for each attempt
+            self.current_time_seconds = 0.0
+            self.current_cue_number = 1
+            self.cues = []
+
+            # Generate cues for each act with interleaved shot types
+            # Reset used_outputs before each act to prevent duplicates
+            self.used_outputs = set()
+            self._generate_interleaved_act_cues("opening")
+
+            # Reset used_outputs before each act to prevent duplicates
+            self.used_outputs = set()
+            self._generate_interleaved_act_cues("buildup")
+
+            # Reset used_outputs before each act to prevent duplicates
+            self.used_outputs = set()
+            self._generate_interleaved_act_cues("finale")
+
+            # Sort cues by execution time
+            self.cues.sort(key=lambda cue: self._time_to_seconds(cue[4]))
+
+            # Reassign cue numbers to ensure they're sequential
+            for i, cue in enumerate(self.cues):
+                cue[0] = i + 1
+
+            # Evaluate the quality of this generation
+            score = self._evaluate_generation()
+
+            if self.debug:
+                print(f"Generation attempt {self.generation_attempts}: Score = {score}")
+
+            # Keep the best generation
+            if score > best_score:
+                best_cues = self.cues.copy()
+                best_score = score
+
+                # If we have a perfect score, stop generating
+                if score == 100:
+                    if self.debug:
+                        print("Perfect score achieved, stopping generation")
+                    break
+
+        # Use the best generation
+        self.cues = best_cues
+
+        # Verify the final generation
+        self._verify_generation()
+
+        return self.cues
+
+    def _validate_act_configuration(self) -> bool:
+        """
+        Validate the act configuration to ensure it's valid
+
+        Returns:
+            True if the configuration is valid, False otherwise
+        """
+        if not self.act_config:
+            print("Error: No act configuration provided")
+            return False
+
+        # Check if all required acts are present
+        required_acts = ["opening", "buildup", "finale"]
+        for act in required_acts:
+            if act not in self.act_config:
+                print(f"Error: Missing act configuration for {act}")
+                return False
+
+        # Check if percentages add up to 100%
+        total_percentage = 0
+        for act in required_acts:
+            percentage = self.act_config[act].get("percentage", 0)
+            total_percentage += percentage
+
+        if abs(total_percentage - 100) > 0.01:  # Allow small floating point errors
+            print(f"Warning: Act percentages add up to {total_percentage}%, not 100%")
+            # We'll continue anyway, as the dialog should normalize this
+
+        # Check if shot types are valid for each act
+        for act in required_acts:
+            shot_types = self.act_config[act].get("shot_types", {})
+
+            # Check if any shot types are enabled
+            enabled_types = [st for st, config in shot_types.items() if config.get("checkbox", False)]
+            if not enabled_types:
+                print(f"Warning: No shot types enabled for {act} act")
+                # We'll continue anyway, as we'll handle this case in the generation
+
+            # Check if percentages add up to 100% for enabled shot types
+            total_percentage = 0
+            for shot_type, config in shot_types.items():
+                if config.get("checkbox", False):
+                    percentage = config.get("percentage", 0)
+                    total_percentage += percentage
+
+            if enabled_types and abs(total_percentage - 100) > 0.01:  # Allow small floating point errors
+                print(f"Warning: Shot type percentages for {act} act add up to {total_percentage}%, not 100%")
+                # We'll continue anyway, as we'll normalize this in the generation
+
+        return True
+
+    def _allocate_outputs_to_acts(self):
+        """Allocate outputs to acts based on act percentages ensuring no duplicates"""
+        self.act_outputs = {}
+
+        # Calculate exact output counts based on normalized percentages
+        total_percentage = sum(self.act_config[act].get("percentage", 0) for act in ["opening", "buildup", "finale"])
+
+        # Normalize to exactly 100%
+        normalized_percentages = {}
+        for act in ["opening", "buildup", "finale"]:
+            percentage = self.act_config[act].get("percentage", 0)
+            normalized_percentages[act] = (percentage / total_percentage) * 100
+
+        # Calculate exact output counts
+        act_outputs = {}
+        total_allocated = 0
+
+        for act in ["opening", "buildup", "finale"]:
+            percentage = normalized_percentages[act]
+            count = int(round((percentage / 100.0) * self.total_outputs))
+
+            # Ensure we don't exceed total
+            if act == "finale":
+                # Finale gets remaining outputs to ensure exact total
+                count = self.total_outputs - total_allocated
+
+            act_outputs[act] = count
+            total_allocated += count
+
+        # Allocate specific output numbers ensuring no duplicates
+        all_outputs = list(range(1, self.total_outputs + 1))
+
+        if self.sequential_cues:
+            # Sequential allocation: opening -> buildup -> finale
+            current_idx = 0
+            for act in ["opening", "buildup", "finale"]:
+                count = act_outputs[act]
+                self.act_outputs[act] = all_outputs[current_idx:current_idx + count]
+                current_idx += count
+        else:
+            # Random allocation ensuring no duplicates
+            remaining_outputs = all_outputs.copy()
+            for act in ["opening", "buildup", "finale"]:
+                count = act_outputs[act]
+                selected = random.sample(remaining_outputs, count)
+                self.act_outputs[act] = selected
+                for output in selected:
+                    remaining_outputs.remove(output)
+
+        # Ensure exact allocation
+        total_allocated = sum(len(outputs) for outputs in self.act_outputs.values())
+        if total_allocated != self.total_outputs:
+            print(f"ERROR: Allocated {total_allocated} outputs instead of {self.total_outputs}")
+            # Fix by adjusting finale
+            finale_outputs = self.act_outputs.get("finale", [])
+            adjustment = self.total_outputs - total_allocated
+            if adjustment != 0:
+                print(f"Adjusting finale by {adjustment} outputs")
+                # This should never happen with proper rounding
+
+        if self.debug:
+            for act, outputs in self.act_outputs.items():
+                print(f"{act} act: {len(outputs)} outputs ({sorted(outputs)})")
+
+    def _allocate_outputs_to_shot_types(self):
+        """Allocate outputs to shot types within each act"""
+        self.shot_type_outputs = {}
+
+        for act, outputs in self.act_outputs.items():
+            self.shot_type_outputs[act] = {}
+
+            # Get shot types for this act
+            shot_types = self.act_config[act].get("shot_types", {})
+
+            # Get enabled shot types
+            enabled_types = [st for st, config in shot_types.items() if config.get("checkbox", False)]
+
+            # If no shot types are enabled, use SINGLE SHOT as default
+            if not enabled_types:
+                self.shot_type_outputs[act]["SINGLE SHOT"] = outputs.copy()
                 continue
 
-            # Generate cues for this section
-            section = ShowSection.FINALE if (i == len(section_durations) - 1) else ShowSection(i)
-            section_cues = self._generate_professional_section(
-                section=section,
+            # Calculate total percentage of enabled shot types
+            total_percentage = 0
+            for shot_type in enabled_types:
+                percentage = shot_types[shot_type].get("percentage", 0)
+                total_percentage += percentage
+
+            # Normalize percentages if needed
+            if abs(total_percentage - 100) > 0.01:  # Allow small floating point errors
+                for shot_type in enabled_types:
+                    shot_types[shot_type]["percentage"] = (shot_types[shot_type].get("percentage",
+                                                                                     0) / total_percentage) * 100
+
+            # Allocate outputs to shot types
+            remaining_outputs = outputs.copy()
+
+            for i, shot_type in enumerate(enabled_types):
+                percentage = shot_types[shot_type].get("percentage", 0)
+
+                # Calculate outputs for this shot type
+                if i < len(enabled_types) - 1:
+                    # For all shot types except the last one, calculate based on percentage
+                    shot_type_output_count = int(round((percentage / 100.0) * len(outputs)))
+                else:
+                    # For the last shot type, use all remaining outputs
+                    shot_type_output_count = len(remaining_outputs)
+
+                # Ensure we don't exceed remaining outputs
+                shot_type_output_count = min(shot_type_output_count, len(remaining_outputs))
+
+                # Allocate outputs to this shot type
+                if self.sequential_cues:
+                    # Sequential allocation
+                    self.shot_type_outputs[act][shot_type] = remaining_outputs[:shot_type_output_count]
+                    remaining_outputs = remaining_outputs[shot_type_output_count:]
+                else:
+                    # Random allocation
+                    self.shot_type_outputs[act][shot_type] = random.sample(remaining_outputs, shot_type_output_count)
+                    # Remove allocated outputs from remaining_outputs
+                    for output in self.shot_type_outputs[act][shot_type]:
+                        remaining_outputs.remove(output)
+
+            # Verify that all outputs for this act have been allocated
+            total_allocated = sum(len(outputs) for outputs in self.shot_type_outputs[act].values())
+            if total_allocated != len(self.act_outputs[act]):
+                print(
+                    f"Warning: Allocated {total_allocated} outputs for {act} act instead of {len(self.act_outputs[act])}")
+
+            if self.debug:
+                for shot_type, outputs in self.shot_type_outputs[act].items():
+                    print(f"{act} act - {shot_type}: {len(outputs)} outputs ({sorted(outputs)})")
+
+    def _generate_interleaved_act_cues(self, act_key: str):
+        """
+        Generate cues for a specific act with interleaved shot types
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+        """
+        if act_key not in self.act_config:
+            print(f"Warning: No configuration found for {act_key} act")
+            return
+
+        if act_key not in self.shot_type_outputs:
+            print(f"Warning: No outputs allocated for {act_key} act")
+            return
+
+        # Calculate start time and duration for this act
+        act_percentage = self.act_config[act_key].get("percentage", 0)
+        act_duration = (act_percentage / 100.0) * self.total_duration
+
+        if act_key == "opening":
+            act_start_time = 0.0
+        elif act_key == "buildup":
+            opening_percentage = self.act_config["opening"].get("percentage", 0)
+            act_start_time = (opening_percentage / 100.0) * self.total_duration
+        else:  # finale
+            opening_percentage = self.act_config["opening"].get("percentage", 0)
+            buildup_percentage = self.act_config["buildup"].get("percentage", 0)
+            act_start_time = ((opening_percentage + buildup_percentage) / 100.0) * self.total_duration
+
+        if self.debug:
+            print(
+                f"Generating {act_key} act: {len(self.act_outputs[act_key])} outputs over {act_duration:.2f} seconds (starting at {act_start_time:.2f}s)")
+
+        # Get special effects configuration
+        special_effects = self.act_config[act_key].get("special_effects", {})
+
+        # Create a list of shot types with their outputs
+        shot_type_list = []
+        for shot_type, outputs in self.shot_type_outputs[act_key].items():
+            if outputs:
+                shot_config = self.act_config[act_key].get("shot_types", {}).get(shot_type, {})
+                shot_type_list.append((shot_type, outputs, shot_config))
+
+        # If no shot types, return
+        if not shot_type_list:
+            return
+
+        # Calculate time segments for interleaving
+        num_segments = 10  # Divide the act into 10 segments for interleaving
+        segment_duration = act_duration / num_segments
+
+        # Generate cues for each segment with interleaved shot types
+        for segment in range(num_segments):
+            segment_start_time = act_start_time + segment * segment_duration
+            segment_end_time = segment_start_time + segment_duration
+
+            # Shuffle shot types for this segment to randomize the order
+            random.shuffle(shot_type_list)
+
+            # Calculate outputs per shot type for this segment
+            total_remaining_outputs = sum(len(outputs) for _, outputs, _ in shot_type_list)
+            if total_remaining_outputs == 0:
+                continue
+
+            # Calculate segment outputs proportionally
+            segment_outputs = {}
+            for shot_type, outputs, _ in shot_type_list:
+                # Calculate proportion of outputs for this shot type
+                proportion = len(outputs) / total_remaining_outputs
+                # Calculate outputs for this segment
+                segment_output_count = max(1, int(round(proportion * total_remaining_outputs / num_segments)))
+                # Ensure we don't exceed available outputs
+                segment_output_count = min(segment_output_count, len(outputs))
+                # Store segment outputs
+                segment_outputs[shot_type] = segment_output_count
+
+            # Generate cues for each shot type in this segment
+            current_time = segment_start_time
+
+            for shot_type, outputs, shot_config in shot_type_list:
+                if shot_type not in segment_outputs or segment_outputs[shot_type] <= 0:
+                    continue
+
+                # Get outputs for this shot type in this segment
+                output_count = segment_outputs[shot_type]
+                segment_shot_outputs = outputs[:output_count]
+
+                # Remove used outputs from the shot type's outputs
+                self.shot_type_outputs[act_key][shot_type] = outputs[output_count:]
+
+                # Update shot_type_list for the next segment
+                shot_type_list = [(st, remaining_outputs, sc) for st, remaining_outputs, sc in shot_type_list if
+                                  remaining_outputs]
+
+                # Calculate duration for this shot type in this segment
+                shot_duration = segment_duration * (output_count / sum(segment_outputs.values()))
+
+                # Generate cues for this shot type
+                shot_cues = self._generate_shot_type_cues(
+                    act_key=act_key,
+                    shot_type=shot_type,
+                    outputs=segment_shot_outputs,
+                    start_time=current_time,
+                    duration=shot_duration,
+                    shot_config=shot_config,
+                    special_effects=special_effects
+                )
+
+                # Add cues to the list
+                self.cues.extend(shot_cues)
+
+                # Update current time
+                if shot_cues:
+                    # Find the latest cue time
+                    latest_time = max([self._time_to_seconds(cue[4]) for cue in shot_cues])
+                    current_time = latest_time + random.uniform(
+                        self.DELAY_BETWEEN_CUES[act_key]["min"],
+                        self.DELAY_BETWEEN_CUES[act_key]["max"]
+                    )
+                else:
+                    # If no cues were generated, advance time by a small amount
+                    current_time += self.DELAY_BETWEEN_CUES[act_key]["min"]
+
+    def _generate_shot_type_cues(self, act_key: str, shot_type: str, outputs: List[int],
+                                 start_time: float, duration: float, shot_config: Dict,
+                                 special_effects: Dict) -> List[List]:
+        """
+        Generate cues for a specific shot type using all user parameters explicitly
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+            outputs: List of outputs to use
+            start_time: Start time in seconds
+            duration: Duration in seconds
+            shot_config: Configuration for this shot type
+            special_effects: Special effects configuration
+
+        Returns:
+            List of cues
+        """
+        if not outputs:
+            return []
+
+        # IMPORTANT: We're NOT filtering outputs here anymore to ensure ALL outputs are used
+        # This was causing the issue where many outputs were being skipped
+
+        if not outputs:
+            return []
+
+        # Get user-configured delay ranges from shot_config
+        min_delay = shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"])
+        max_delay = shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+
+        # Check for special effects based on user selection
+        effect_type = self._get_special_effect_type(special_effects)
+
+        # Enhanced special effects handling
+        if effect_type and len(outputs) >= 4:
+            # Use exact percentages based on user configuration
+            effect_percentage = 0.7  # 70% for effects as per requirements
+            effect_output_count = int(len(outputs) * effect_percentage)
+            regular_output_count = len(outputs) - effect_output_count
+
+            effect_outputs = outputs[:effect_output_count]
+            regular_outputs = outputs[effect_output_count:]
+
+            # Generate effect sequence using hard-coded patterns
+            effect_cues = self._generate_enhanced_effect_sequence(
+                act_key=act_key,
+                shot_type=shot_type,
+                effect_type=effect_type,
+                outputs=effect_outputs,
+                start_time=start_time,
+                duration=duration * effect_percentage,
+                shot_config=shot_config,
+                min_delay=min_delay,
+                max_delay=max_delay
+            )
+
+            # Generate regular cues for remaining outputs
+            regular_cues = self._generate_enhanced_regular_cues(
+                act_key=act_key,
+                shot_type=shot_type,
+                outputs=regular_outputs,
+                start_time=start_time + duration * effect_percentage,
+                duration=duration * (1 - effect_percentage),
+                shot_config=shot_config,
+                min_delay=min_delay,
+                max_delay=max_delay
+            )
+
+            return effect_cues + regular_cues
+        else:
+            # Generate regular cues using exact user parameters
+            return self._generate_enhanced_regular_cues(
+                act_key=act_key,
+                shot_type=shot_type,
+                outputs=outputs,
                 start_time=start_time,
                 duration=duration,
-                num_outputs=num_outputs
+                shot_config=shot_config,
+                min_delay=min_delay,
+                max_delay=max_delay
             )
 
-            # Add cues to the list
-            all_cues.extend(section_cues)
-
-            # Update start time for next section
-            start_time += duration
-
-        # Check if we've used all outputs and add any remaining as single shots
-        used_count = len(self.used_outputs)
-        if used_count < total_outputs:
-            remaining_outputs = total_outputs - used_count
-            # Add remaining outputs as single shots at the end of the show
-            finale_time = max([self._time_to_seconds(cue[4]) for cue in all_cues]) if all_cues else start_time
-
-            # Space them out evenly in the last 15% of the show duration
-            spacing = max(0.5, (total_duration * 0.15) / remaining_outputs)
-
-            for i in range(remaining_outputs):
-                time_offset = spacing * i
-                execute_time = min(finale_time + time_offset, total_duration - 1)
-
-                # Get a unique output
-                output = self._get_unique_outputs(1)
-                if output:
-                    # Create a single shot cue
-                    cue = [
-                        self.current_cue_number,
-                        "SINGLE SHOT",
-                        str(output[0]),
-                        0,  # No delay
-                        self._format_time(execute_time)
-                    ]
-                    all_cues.append(cue)
-                    self.current_cue_number += 1
-
-        # Sort cues by execution time
-        all_cues.sort(key=lambda cue: self._time_to_seconds(cue[4]))
-
-        # Reassign cue numbers to ensure they're sequential
-        for i, cue in enumerate(all_cues):
-            cue[0] = i + 1
-
-        return all_cues
-
-    def _calculate_crescendo_timing(self, num_outputs: int, start_time: float, duration: float) -> List[float]:
+    def _get_special_effect_type(self, special_effects: Dict) -> Optional[str]:
         """
-        Calculate timing for crescendo effect with accelerating shots
+        Determine which special effect to use based on configuration
 
         Args:
-            num_outputs: Number of outputs to space out
+            special_effects: Special effects configuration
+
+        Returns:
+            Effect type or None if no effect should be used
+        """
+        # Check if any special effects are enabled
+        enabled_effects = []
+        for effect, enabled in special_effects.items():
+            if enabled:
+                enabled_effects.append(effect)
+
+        # If no effects are enabled, return None
+        if not enabled_effects:
+            return None
+
+        # Select a random effect from enabled effects
+        return random.choice(enabled_effects)
+
+    def _generate_enhanced_effect_sequence(self, act_key: str, shot_type: str, effect_type: str,
+                                           outputs: List[int], start_time: float, duration: float,
+                                           shot_config: Dict = None, min_delay: float = None,
+                                           max_delay: float = None) -> List[List]:
+        """
+        Generate an enhanced special effect sequence with user parameters
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+            effect_type: Type of effect to generate
+            outputs: List of outputs to use
             start_time: Start time in seconds
-            duration: Total duration in seconds
+            duration: Duration in seconds
+            shot_config: Configuration for the shot (optional)
+            min_delay: Minimum delay between cues (optional)
+            max_delay: Maximum delay between cues (optional)
 
         Returns:
-            List of shot times in seconds
+            List of cues
         """
-        if num_outputs <= 0:
+        # Use empty dict if shot_config is None
+        if shot_config is None:
+            shot_config = {}
+
+        # If min_delay and max_delay are provided, update shot_config
+        if min_delay is not None:
+            shot_config = shot_config.copy()  # Create a copy to avoid modifying the original
+            shot_config["min_delay"] = min_delay
+
+        if max_delay is not None:
+            shot_config = shot_config.copy() if "min_delay" not in shot_config else shot_config
+            shot_config["max_delay"] = max_delay
+
+        # Call the underlying implementation
+        return self._generate_effect_sequence(act_key, shot_type, effect_type, outputs, start_time, duration,
+                                              shot_config)
+
+    def _generate_effect_sequence(self, act_key: str, shot_type: str, effect_type: str,
+                                  outputs: List[int], start_time: float, duration: float,
+                                  shot_config: Dict) -> List[List]:
+        """
+        Generate a special effect sequence
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+            effect_type: Type of effect to generate
+            outputs: List of outputs to use
+            start_time: Start time in seconds
+            duration: Duration in seconds
+            shot_config: Configuration for this shot type
+
+        Returns:
+            List of cues
+        """
+        # IMPORTANT: We're NOT filtering outputs here anymore to ensure ALL outputs are used
+        # This was causing the issue where many outputs were being skipped
+
+        if not outputs:
             return []
 
-        if num_outputs == 1:
-            return [start_time]
+        # Map effect type to rhythm pattern
+        rhythm_key = None
+        if effect_type == "Rock Ballad":
+            rhythm_key = "rock_ballad"
+        elif effect_type == "Metal Ballad":
+            rhythm_key = "metal_ballad"
+        elif effect_type == "Trot":
+            rhythm_key = "trot"
+        elif effect_type == "Gallop":
+            rhythm_key = "gallop"
+        elif effect_type == "Step":
+            rhythm_key = "step"
+        elif effect_type == "Chase":
+            rhythm_key = "chase"
+        elif effect_type == "Random":
+            rhythm_key = "random"
+        elif effect_type == "False Finale" and act_key == "finale":
+            return self._generate_false_finale(
+                act_key=act_key,
+                shot_type=shot_type,
+                outputs=outputs,
+                start_time=start_time,
+                duration=duration,
+                shot_config=shot_config
+            )
 
-        # For crescendo effect, we use a non-linear timing curve
-        # The shots start slower and accelerate toward the end
-        shot_times = []
+        # If no valid rhythm pattern, generate regular cues
+        if not rhythm_key or rhythm_key not in self.RHYTHM_PATTERNS:
+            return self._generate_regular_cues(
+                act_key=act_key,
+                shot_type=shot_type,
+                outputs=outputs,
+                start_time=start_time,
+                duration=duration,
+                shot_config=shot_config
+            )
 
-        # Use a quadratic function to distribute times with increasing frequency
-        for i in range(num_outputs):
-            # Normalize position (0 to 1)
-            position = i / (num_outputs - 1)
-            # Apply quadratic curve (starts slower, ends faster)
-            # Position^2 gives accelerating curve
-            curved_position = position * position
-            # Calculate time
-            time = start_time + (curved_position * duration)
-            shot_times.append(time)
+        # Get rhythm pattern
+        rhythm_pattern = self.RHYTHM_PATTERNS[rhythm_key]
 
-        return shot_times
+        # For random pattern, generate a random pattern
+        if rhythm_key == "random":
+            pattern = [random.choice([0, 1, 1, 1]) for _ in range(16)]  # 75% chance of 1, 25% chance of 0
+            delay_multipliers = [random.uniform(0.25, 1.0) for _ in range(8)]
+        else:
+            pattern = rhythm_pattern["pattern"]
+            delay_multipliers = rhythm_pattern["delay_multipliers"]
 
-    def _distribute_outputs_to_sections(self, total_outputs: int) -> Dict[ShowSection, List[int]]:
-        """
-        Distribute outputs across show sections based on section intensity in sequential order
-
-        Args:
-            total_outputs: Total number of outputs available
-
-        Returns:
-            Dictionary mapping show sections to lists of output numbers
-        """
-        # Create a pool of all available outputs in sequential order
-        all_outputs = list(range(1, total_outputs + 1))
-        # We're not shuffling the outputs to maintain sequential order
-
-        # Calculate outputs per section based on section intensities
-        section_outputs = {}
-        outputs_remaining = total_outputs
-        next_output_index = 0
-
-        for section in self.show_sections:
-            # Determine how many outputs to allocate to this section
-            intensity = self.section_intensities[section.value]
-            section_output_count = int(round(total_outputs * (intensity / 100)))
-
-            # Adjust for rounding errors to ensure we use exactly total_outputs
-            if section == self.show_sections[-1]:
-                # Last section gets remaining outputs
-                section_output_count = outputs_remaining
-            else:
-                # Ensure we don't allocate more than remaining
-                section_output_count = min(section_output_count, outputs_remaining)
-                outputs_remaining -= section_output_count
-
-            # Assign outputs to this section in sequential order
-            section_end_index = next_output_index + section_output_count
-            section_outputs[section] = all_outputs[next_output_index:section_end_index]
-            next_output_index = section_end_index
-
-        return section_outputs
-
-    def _calculate_section_durations(self, total_duration: float,
-                                     section_intensities: List[int]) -> List[float]:
-        """
-        Calculate durations for each section based on total duration and intensities
-
-        Args:
-            total_duration: Total show duration in seconds
-            section_intensities: List of intensity percentages for each section
-
-        Returns:
-            List of durations in seconds for each section
-        """
-        # If intensities sum to 0, make them equal
-        if sum(section_intensities) == 0:
-            section_intensities = [20 for _ in range(len(section_intensities))]
-
-        # Calculate proportion of total duration for each section
-        total_intensity = sum(section_intensities)
-        durations = [
-            (intensity / total_intensity) * total_duration
-            for intensity in section_intensities
-        ]
-
-        return durations
-
-    def _generate_professional_section(self, section: ShowSection,
-                                       start_time: float, duration: float,
-                                       num_outputs: int) -> List[List]:
-        """
-        Generate cues for a specific professional show section
-
-        Args:
-            section: The show section being generated
-            start_time: Start time of this section in seconds
-            duration: Duration of this section in seconds
-            num_outputs: Number of outputs to use in this section
-
-        Returns:
-            List of cues for this section
-        """
-        if num_outputs <= 0:
-            return []
-
-        section_cues = []
+        # Generate cues based on rhythm pattern
+        cues = []
         current_time = start_time
-        end_time = start_time + duration
-        outputs_left = num_outputs
 
-        # Track starting output count to ensure we use exactly what was requested
-        starting_output_count = len(self.used_outputs)
-        target_output_count = starting_output_count + num_outputs
+        # Calculate base delay between outputs
+        if shot_type in ["SINGLE RUN", "DOUBLE RUN"]:
+            # For run types, use the min/max delay from shot config
+            min_delay = shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"])
+            max_delay = shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+            base_delay = (min_delay + max_delay) / 2
+        else:
+            # For shot types, use the act's delay between cues
+            base_delay = (self.DELAY_BETWEEN_CUES[act_key]["min"] + self.DELAY_BETWEEN_CUES[act_key]["max"]) / 2
 
-        # Reserve some outputs for special effect sequences
-        sequence_probability = self._select_weighted_random(self.SEQUENCE_PROBABILITIES[section])
-        reserved_for_sequence = 0
+        # Adjust base delay to fit all outputs within duration
+        pattern_length = len(pattern)
+        pattern_repeats = math.ceil(len(outputs) / sum(1 for p in pattern if p > 0))
+        total_pattern_steps = pattern_length * pattern_repeats
 
-        if sequence_probability is not None and outputs_left > 8:
-            # Reserve 25-40% of outputs for special sequences based on section
-            if section == ShowSection.OPENING:
-                sequence_percentage = 0.25
-            elif section == ShowSection.FINALE:
-                sequence_percentage = 0.40
-            else:
-                sequence_percentage = 0.30
+        # Ensure we don't divide by zero
+        if total_pattern_steps > 0:
+            base_delay = min(base_delay, duration / total_pattern_steps)
 
-            reserved_for_sequence = int(outputs_left * sequence_percentage)
-            outputs_left -= reserved_for_sequence
+        # Generate cues based on pattern
+        pattern_index = 0
+        outputs_index = 0
 
-        # Get the cue types distribution for this section
-        cue_types = self.SECTION_CUE_TYPES[section].copy()
+        while outputs_index < len(outputs) and current_time < start_time + duration:
+            # Get pattern value for this step
+            pattern_value = pattern[pattern_index % pattern_length]
 
-        # Keep generating cues until we use all outputs or reach the end time
-        while outputs_left > 0 and current_time < end_time:
-            # As we approach the end time, prioritize single shots to use up remaining outputs
-            time_remaining = end_time - current_time
-            if time_remaining < 3.0 and outputs_left > 0:
-                # Force single shots when time is running out
-                if outputs_left == 1 or random.random() < 0.8:
-                    cue_type = "SINGLE SHOT"
-                else:
-                    cue_type = "DOUBLE SHOT"
-            else:
-                # Select a cue type based on weighted probabilities for this section
-                cue_type = self._select_weighted_random(cue_types)
+            # Apply delay multiplier
+            delay_multiplier = delay_multipliers[pattern_index % len(delay_multipliers)]
+            step_delay = base_delay * delay_multiplier
 
-            # For the last few outputs, ensure we use exactly what's needed
-            if outputs_left <= 4:
-                if outputs_left == 1:
-                    cue_type = "SINGLE SHOT"
-                elif outputs_left >= 2:
-                    cue_type = "DOUBLE SHOT"
-
-            # Determine how many outputs this cue will use
-            outputs_for_cue = self._get_outputs_for_cue_type(section, cue_type, outputs_left)
-
-            if outputs_for_cue <= 0:
-                # Can't fit this cue type with remaining outputs, try another
+            # If pattern value is 0, just advance time
+            if pattern_value == 0:
+                current_time += step_delay
+                pattern_index += 1
                 continue
 
-            # Generate the cue
-            cue = self._generate_professional_cue(
-                section=section,
-                cue_type=cue_type,
-                num_outputs=outputs_for_cue,
-                execute_time=current_time
-            )
-
-            if cue:
-                section_cues.append(cue)
-
-                # Update outputs left
-                outputs_left -= outputs_for_cue
-
-                # Update time for next cue based on section timing
-                time_between = random.uniform(
-                    self.TIME_BETWEEN_CUES[section]["min"],
-                    self.TIME_BETWEEN_CUES[section]["max"]
-                )
-
-                # No special handling needed for SHOT types as they have no duration
-
-                current_time += time_between
-            else:
-                # If we couldn't generate a cue, just advance time a bit and try again
-                current_time += 0.5
-
-                # If we're having trouble finding outputs, allow small time overruns to complete the section
-                if current_time >= end_time and outputs_left > 0:
-                    # Allow up to 10% time overrun to finish using all outputs
-                    allowed_overrun = duration * 0.1
-                    end_time = start_time + duration + allowed_overrun
-
-        # If we have reserved outputs, generate special effect sequence
-        if reserved_for_sequence > 0:
-            # Choose a position for the sequence - typically near the end of the section
-            sequence_start = start_time + (duration * 0.6)
-
-            # Allow sequence to use up to 20% of the section duration
-            sequence_duration = duration * 0.2
-
-            # Generate the special effect sequence
-            sequence_cues = self._generate_effect_sequence(
-                section=section,
-                effect_type=sequence_probability,
-                num_outputs=reserved_for_sequence,
-                start_time=sequence_start,
-                duration=sequence_duration
-            )
-
-            section_cues.extend(sequence_cues)
-            reserved_for_sequence = 0  # Mark as used
-
-        # If we still have outputs left, add them as appropriate shots
-        outputs_left = num_outputs - (len(self.used_outputs) - starting_output_count)
-
-        if outputs_left > 0:
-            # Different handling based on section
-            if section == ShowSection.FINALE:
-                # For finale, add as rapid-fire shots
-                rapid_fire_cues = self._generate_rapid_fire_sequence(
-                    section, outputs_left, end_time - 3.0, 2.5
-                )
-                section_cues.extend(rapid_fire_cues)
-            elif section == ShowSection.OPENING:
-                # For opening, add as well-spaced individual shots
-                for i in range(outputs_left):
-                    output = self._get_unique_outputs(1)
-                    if output:
-                        # Space evenly across the section
-                        shot_time = start_time + (duration * (i + 1) / (outputs_left + 1))
-                        cue = [
-                            self.current_cue_number,
-                            "SINGLE SHOT",
-                            str(output[0]),
-                            0,  # No delay
-                            self._format_time(shot_time)
-                        ]
-                        section_cues.append(cue)
-                        self.current_cue_number += 1
-            else:
-                # For other sections, distribute randomly
-                for i in range(outputs_left):
-                    output = self._get_unique_outputs(1)
-                    if output:
-                        # Add at a random time within section
-                        random_time = start_time + (random.random() * duration)
-                        cue = [
-                            self.current_cue_number,
-                            "SINGLE SHOT",
-                            str(output[0]),
-                            0,  # No delay
-                            self._format_time(random_time)
-                        ]
-                        section_cues.append(cue)
-                        self.current_cue_number += 1
-
-        return section_cues
-
-    def _generate_effect_sequence(self, section: ShowSection, effect_type: Optional[EffectSequence],
-                                  num_outputs: int, start_time: float,
-                                  duration: float) -> List[List]:
-        """
-        Generate a special effect sequence of cues
-
-        Args:
-            section: The show section
-            effect_type: Type of effect sequence to generate
-            num_outputs: Number of outputs to use
-            start_time: Start time for the sequence
-            duration: Duration available for the sequence
-
-        Returns:
-            List of cues for the effect sequence
-        """
-        if effect_type is None or num_outputs <= 0:
-            return []
-
-        sequence_cues = []
-
-        # Get unique outputs for this sequence
-        outputs = self._get_unique_outputs(num_outputs)
-        if not outputs:
-            return []
-
-        if effect_type == EffectSequence.FAN:
-            # Fan/sweep pattern - single shots in rapid sequence
-            spacing = duration / num_outputs
-            for i, output in enumerate(outputs):
-                time = start_time + (i * spacing)
+            # Generate cue based on shot type
+            if shot_type == "SINGLE SHOT":
+                # Create cue
                 cue = [
                     self.current_cue_number,
                     "SINGLE SHOT",
-                    str(output),
-                    0,  # No delay
-                    self._format_time(time)
+                    str(outputs[outputs_index]),
+                    0,  # No delay for SINGLE SHOT
+                    self._format_time(current_time)
                 ]
-                sequence_cues.append(cue)
+                cues.append(cue)
                 self.current_cue_number += 1
+                self.used_outputs.add(outputs[outputs_index])  # Mark output as used
+                outputs_index += 1
 
-        elif effect_type == EffectSequence.RIPPLE:
-            # Ripple/wave effect - alternating speeds
-            # Create groups of outputs
-            group_size = min(3, num_outputs // 3)
-            if group_size < 1:
-                group_size = 1
-
-            groups = []
-            for i in range(0, len(outputs), group_size):
-                group = outputs[i:i + group_size]
-                if group:
-                    groups.append(group)
-
-            # Space groups with accelerating pattern
-            time = start_time
-            speed_up_factor = 0.85  # Each gap is 85% of previous
-            gap = duration / (len(groups) * 2)  # Initial gap
-
-            for group in groups:
-                # Create a single or double shot cue for this group
-                if len(group) == 1:
-                    cue_type = "SINGLE SHOT"
-                    outputs_str = str(group[0])
-                    delay = 0
-                else:
-                    # Always use DOUBLE SHOT for groups of 2 or more
-                    cue_type = "DOUBLE SHOT"
-                    # Take only the first two outputs for DOUBLE SHOT
-                    outputs_str = f"{group[0]}, {group[1]}"
-                    delay = 0
-
-                    # If there are more than 2 outputs in the group, create additional cues
-                    remaining = group[2:]
-                    if remaining:
-                        # Create additional SINGLE or DOUBLE SHOTs for remaining outputs
-                        additional_time = time + 0.25  # Add a small delay
-
-                        # Process remaining outputs in pairs if possible
-                        for i in range(0, len(remaining), 2):
-                            if i + 1 < len(remaining):
-                                # Create DOUBLE SHOT
-                                additional_cue = [
-                                    self.current_cue_number,
-                                    "DOUBLE SHOT",
-                                    f"{remaining[i]}, {remaining[i + 1]}",
-                                    0,
-                                    self._format_time(additional_time)
-                                ]
-                            else:
-                                # Create SINGLE SHOT
-                                additional_cue = [
-                                    self.current_cue_number,
-                                    "SINGLE SHOT",
-                                    str(remaining[i]),
-                                    0,
-                                    self._format_time(additional_time)
-                                ]
-
-                            sequence_cues.append(additional_cue)
-                            self.current_cue_number += 1
-                            additional_time += 0.25  # Space out additional cues
-
+            elif shot_type == "DOUBLE SHOT" and outputs_index + 1 < len(outputs):
+                # Create cue
                 cue = [
                     self.current_cue_number,
-                    cue_type,
-                    outputs_str,
-                    delay,
-                    self._format_time(time)
+                    "DOUBLE SHOT",
+                    f"{outputs[outputs_index]}, {outputs[outputs_index + 1]}",
+                    0,  # No delay for DOUBLE SHOT
+                    self._format_time(current_time)
                 ]
-                sequence_cues.append(cue)
+                cues.append(cue)
                 self.current_cue_number += 1
+                self.used_outputs.add(outputs[outputs_index])  # Mark first output as used
+                self.used_outputs.add(outputs[outputs_index + 1])  # Mark second output as used
+                outputs_index += 2
 
-                # Update time and gap for next group
-                time += gap
-                gap *= speed_up_factor
+            elif shot_type == "SINGLE RUN":
+                # Determine number of outputs for this run
+                run_outputs = min(
+                    random.randint(
+                        self.SINGLE_RUN_OUTPUTS[act_key]["min"],
+                        self.SINGLE_RUN_OUTPUTS[act_key]["max"]
+                    ),
+                    len(outputs) - outputs_index
+                )
 
-        elif effect_type == EffectSequence.ALTERNATING:
-            # Alternating left-right effect
-            # Split outputs into two groups
-            mid = len(outputs) // 2
-            left_outputs = outputs[:mid]
-            right_outputs = outputs[mid:]
+                # Ensure we have at least 2 outputs for a run
+                run_outputs = max(2, run_outputs)
 
-            # Space shots evenly, alternating sides
-            shots = []
-            for i in range(max(len(left_outputs), len(right_outputs))):
-                if i < len(left_outputs):
-                    shots.append(("left", left_outputs[i]))
-                if i < len(right_outputs):
-                    shots.append(("right", right_outputs[i]))
+                if outputs_index + run_outputs <= len(outputs):
+                    # Get outputs for this run
+                    run_output_list = outputs[outputs_index:outputs_index + run_outputs]
 
-            # Timing between shots
-            shot_spacing = duration / len(shots)
+                    # Create cue with all outputs in the chain
+                    outputs_str = ", ".join(map(str, run_output_list))
 
-            # Create cues
-            time = start_time
-            for side, output in shots:
-                cue = [
-                    self.current_cue_number,
-                    "SINGLE SHOT",
-                    str(output),
-                    0,  # No delay
-                    self._format_time(time)
-                ]
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-                time += shot_spacing
+                    # Get delay from shot config or use default
+                    delay = random.uniform(
+                        shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                        shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                    )
 
-        elif effect_type == EffectSequence.CHASE:
-            # Chase sequence - series of shots with tight timing
-            # Space shots evenly, with a chase effect
-            # Outputs are already in sequential order
-            shot_spacing = duration / (num_outputs + 2)  # +2 for some padding
-            time = start_time
+                    # Round delay to nearest increment
+                    increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                    delay = round(delay / increment) * increment
 
-            # Process outputs in pairs if possible, or as singles
-            for i in range(0, len(outputs), 2):
-                if i + 1 < len(outputs):
-                    # Create DOUBLE SHOT with sequential outputs
                     cue = [
                         self.current_cue_number,
-                        "DOUBLE SHOT",
-                        f"{outputs[i]}, {outputs[i + 1]}",
-                        0,
-                        self._format_time(time)
+                        "SINGLE RUN",
+                        outputs_str,
+                        delay,
+                        self._format_time(current_time)
                     ]
-                else:
-                    # Create SINGLE SHOT for odd output
-                    cue = [
-                        self.current_cue_number,
-                        "SINGLE SHOT",
-                        str(outputs[i]),
-                        0,
-                        self._format_time(time)
-                    ]
-
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-
-                # Update time for next shot
-                time += shot_spacing
-
-        elif effect_type == EffectSequence.SYNCHRONIZED:
-            # Synchronized effect - groups firing together
-            # Create 2-4 synchronized groups
-            num_groups = min(4, num_outputs // 2)
-            if num_groups < 2:
-                num_groups = 1
-
-            # Divide outputs into groups
-            outputs_per_group = num_outputs // num_groups
-            groups = []
-
-            for i in range(num_groups):
-                start_idx = i * outputs_per_group
-                end_idx = start_idx + outputs_per_group if i < num_groups - 1 else len(outputs)
-                group = outputs[start_idx:end_idx]
-                if group:
-                    groups.append(group)
-
-            # Space groups evenly
-            group_spacing = duration / (len(groups) + 1)
-            time = start_time
-
-            for group in groups:
-                # For all groups, process in pairs to create DOUBLE SHOT or SINGLE SHOT cues
-                # All cues will fire at the same time to create synchronized effect
-                for i in range(0, len(group), 2):
-                    if i + 1 < len(group):
-                        # Create DOUBLE SHOT
-                        cue = [
-                            self.current_cue_number,
-                            "DOUBLE SHOT",
-                            f"{group[i]}, {group[i + 1]}",
-                            0,
-                            self._format_time(time)
-                        ]
-                    else:
-                        # Create SINGLE SHOT for odd output
-                        cue = [
-                            self.current_cue_number,
-                            "SINGLE SHOT",
-                            str(group[i]),
-                            0,
-                            self._format_time(time)
-                        ]
-
-                    sequence_cues.append(cue)
+                    cues.append(cue)
                     self.current_cue_number += 1
 
-                # Update time for next group
-                time += group_spacing
+                    # Mark outputs as used
+                    for output in run_output_list:
+                        self.used_outputs.add(output)
 
-        elif effect_type == EffectSequence.CRESCENDO:
-            # Crescendo - building intensity
-            # Calculate accelerating timing
-            shot_times = self._calculate_crescendo_timing(len(outputs), start_time, duration)
-
-            # First half - single shots with increasing frequency
-            half = len(outputs) // 2
-            for i in range(half):
-                cue = [
-                    self.current_cue_number,
-                    "SINGLE SHOT",
-                    str(outputs[i]),
-                    0,
-                    self._format_time(shot_times[i])
-                ]
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-
-            # Second half - mix of double shots and runs with increasing intensity
-            remaining = outputs[half:]
-
-            # Group remaining outputs
-            i = 0
-            while i < len(remaining):
-                # Determine group size based on position (larger toward end)
-                position = i / len(remaining)
-                remaining_count = len(remaining) - i
-
-                if position > 0.7:  # Last 30%
-                    # Ensure min value doesn't exceed max value
-                    min_size = min(3, remaining_count)
-                    max_size = min(5, remaining_count)
-                    if min_size <= max_size:
-                        group_size = random.randint(min_size, max_size)
-                    else:
-                        group_size = min_size
-                elif position > 0.4:  # Middle 30%
-                    min_size = min(2, remaining_count)
-                    max_size = min(3, remaining_count)
-                    if min_size <= max_size:
-                        group_size = random.randint(min_size, max_size)
-                    else:
-                        group_size = min_size
-                else:  # First 40%
-                    min_size = min(1, remaining_count)
-                    max_size = min(2, remaining_count)
-                    if min_size <= max_size:
-                        group_size = random.randint(min_size, max_size)
-                    else:
-                        group_size = min_size
-
-                # Get group of outputs
-                group = remaining[i:i + group_size]
-                i += len(group)
-
-                # Calculate time index
-                time_index = half + i - len(group)
-                if time_index >= len(shot_times):
-                    time_index = len(shot_times) - 1
-
-                # Determine cue type based on group size - only SINGLE SHOT and DOUBLE SHOT allowed
-                if len(group) == 1:
-                    cue_type = "SINGLE SHOT"
-                    outputs_str = str(group[0])
-                    delay = 0
+                    outputs_index += run_outputs
                 else:
-                    # Use at most 2 outputs for DOUBLE SHOT
-                    cue_type = "DOUBLE SHOT"
-                    outputs_str = f"{group[0]}, {group[1]}"
-                    delay = 0
-
-                    # If there are more outputs in the group, create additional cues
-                    # with slightly staggered timing to maintain crescendo effect
-                    if len(group) > 2:
-                        remaining = group[2:]
-                        time_offset = 0.1  # Small time offset
-
-                        for i in range(0, len(remaining), 2):
-                            if i + 1 < len(remaining):
-                                # Create DOUBLE SHOT
-                                additional_cue = [
-                                    self.current_cue_number,
-                                    "DOUBLE SHOT",
-                                    f"{remaining[i]}, {remaining[i + 1]}",
-                                    0,
-                                    self._format_time(shot_times[time_index] + time_offset)
-                                ]
-                            else:
-                                # Create SINGLE SHOT
-                                additional_cue = [
-                                    self.current_cue_number,
-                                    "SINGLE SHOT",
-                                    str(remaining[i]),
-                                    0,
-                                    self._format_time(shot_times[time_index] + time_offset)
-                                ]
-
-                            sequence_cues.append(additional_cue)
-                            self.current_cue_number += 1
-                            time_offset += 0.1  # Increase offset for each additional cue
-
-                cue = [
-                    self.current_cue_number,
-                    cue_type,
-                    ", ".join(map(str, group)),
-                    delay,
-                    self._format_time(shot_times[time_index])
-                ]
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-
-        return sequence_cues
-
-    def _generate_rapid_fire_sequence(self, section: ShowSection, num_outputs: int,
-                                      start_time: float, duration: float) -> List[List]:
-        """
-        Generate a rapid-fire sequence of shots with sequential outputs
-
-        Args:
-            section: Show section
-            num_outputs: Number of outputs to use
-            start_time: Start time for the sequence
-            duration: Duration available for the sequence
-
-        Returns:
-            List of cues for the rapid-fire sequence
-        """
-        sequence_cues = []
-
-        # Get unique outputs in sequential order
-        outputs = self._get_unique_outputs(num_outputs)
-        if not outputs:
-            return []
-
-        # Ensure outputs are sorted in ascending order
-        outputs.sort()
-
-        # For small numbers, use single shots
-        if num_outputs <= 4:
-            spacing = duration / num_outputs
-            for i, output in enumerate(outputs):
-                time = start_time + (i * spacing)
-                cue = [
-                    self.current_cue_number,
-                    "SINGLE SHOT",
-                    str(output),
-                    0,
-                    self._format_time(time)
-                ]
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-        else:
-            # For larger numbers, use rapid sequence of SHOT types
-            # Space shots more tightly to create rapid-fire effect
-            shot_spacing = duration / (num_outputs * 1.2)  # Slightly tighter spacing
-            time = start_time
-
-            # Process outputs in pairs where possible
-            for i in range(0, len(outputs), 2):
-                if i + 1 < len(outputs):
-                    # Create DOUBLE SHOT
-                    cue = [
-                        self.current_cue_number,
-                        "DOUBLE SHOT",
-                        f"{outputs[i]}, {outputs[i + 1]}",
-                        0,
-                        self._format_time(time)
-                    ]
-                else:
-                    # Create SINGLE SHOT for odd output
+                    # Not enough outputs left for a run, create a single shot
                     cue = [
                         self.current_cue_number,
                         "SINGLE SHOT",
-                        str(outputs[i]),
-                        0,
-                        self._format_time(time)
+                        str(outputs[outputs_index]),
+                        0,  # No delay for SINGLE SHOT
+                        self._format_time(current_time)
                     ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+                    self.used_outputs.add(outputs[outputs_index])  # Mark output as used
+                    outputs_index += 1
 
-                sequence_cues.append(cue)
-                self.current_cue_number += 1
-                time += shot_spacing
+            elif shot_type == "DOUBLE RUN" and outputs_index + 1 < len(outputs):
+                # Determine number of output pairs for this run
+                run_pairs = min(
+                    random.randint(
+                        self.DOUBLE_RUN_OUTPUTS[act_key]["min"],
+                        self.DOUBLE_RUN_OUTPUTS[act_key]["max"]
+                    ),
+                    (len(outputs) - outputs_index) // 2
+                )
 
-        return sequence_cues
+                # Ensure we have at least 1 pair for a run
+                run_pairs = max(1, run_pairs)
 
-    def _generate_professional_cue(self, section: ShowSection, cue_type: str,
-                                   num_outputs: int, execute_time: float) -> List:
+                if outputs_index + run_pairs * 2 <= len(outputs):
+                    # Get all outputs for this run
+                    run_outputs = outputs[outputs_index:outputs_index + run_pairs * 2]
+
+                    # Format all outputs as a comma-separated list
+                    outputs_str = ", ".join(map(str, run_outputs))
+
+                    # Get delay from shot config or use default
+                    delay = random.uniform(
+                        shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                        shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                    )
+
+                    # Round delay to nearest increment
+                    increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                    delay = round(delay / increment) * increment
+
+                    cue = [
+                        self.current_cue_number,
+                        "DOUBLE RUN",
+                        outputs_str,
+                        delay,
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+
+                    # Mark outputs as used
+                    for output in run_outputs:
+                        self.used_outputs.add(output)
+
+                    outputs_index += run_pairs * 2
+                else:
+                    # Not enough outputs left for a double run, create a double shot
+                    cue = [
+                        self.current_cue_number,
+                        "DOUBLE SHOT",
+                        f"{outputs[outputs_index]}, {outputs[outputs_index + 1]}",
+                        0,  # No delay for DOUBLE SHOT
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+                    self.used_outputs.add(outputs[outputs_index])  # Mark first output as used
+                    self.used_outputs.add(outputs[outputs_index + 1])  # Mark second output as used
+                    outputs_index += 2
+
+            # Advance time and pattern index
+            current_time += step_delay
+            pattern_index += 1
+
+        # If we have remaining outputs, add them as regular cues
+        if outputs_index < len(outputs):
+            remaining_outputs = outputs[outputs_index:]
+            remaining_duration = max(0, start_time + duration - current_time)
+
+            remaining_cues = self._generate_regular_cues(
+                act_key=act_key,
+                shot_type=shot_type,
+                outputs=remaining_outputs,
+                start_time=current_time,
+                duration=remaining_duration,
+                shot_config=shot_config
+            )
+
+            cues.extend(remaining_cues)
+
+        return cues
+
+    def _generate_false_finale(self, act_key: str, shot_type: str, outputs: List[int],
+                               start_time: float, duration: float,
+                               shot_config: Dict) -> List[List]:
         """
-        Generate a single cue of the specified type for a professional show
+        Generate a false finale sequence
 
         Args:
-            section: Show section this cue belongs to
-            cue_type: Type of cue (SINGLE SHOT, DOUBLE SHOT, etc.)
-            num_outputs: Number of outputs to use
-            execute_time: Execution time in seconds
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+            outputs: List of outputs to use
+            start_time: Start time in seconds
+            duration: Duration in seconds
+            shot_config: Configuration for this shot type
 
         Returns:
-            A formatted cue ready for the cue table, or None if can't be created
+            List of cues
         """
-        # Generate required number of unique outputs
-        outputs = self._get_unique_outputs(num_outputs)
+        # IMPORTANT: We're NOT filtering outputs here anymore to ensure ALL outputs are used
+        # This was causing the issue where many outputs were being skipped
+
         if not outputs:
-            return None  # Couldn't get enough unique outputs
-
-        # Format time as minutes:seconds.milliseconds
-        formatted_time = self._format_time(execute_time)
-
-        # Format outputs string based on cue type
-        outputs_str = self._format_outputs_string(cue_type, outputs)
-
-        # Set delay for run types
-        delay = 0
-        if "RUN" in cue_type:
-            # Use only specific delay values: 0.25, 0.5, 0.75, or 1 second
-            # Select delay based on section (faster for finale, slower for opening)
-            if section == ShowSection.OPENING:
-                # Opening - slower, more deliberate
-                delay_options = [0.5, 0.75, 1.0]
-            elif section == ShowSection.BUILDUP:
-                # Buildup - medium
-                delay_options = [0.5, 0.75]
-            elif section == ShowSection.MAIN_BODY:
-                # Main body - medium
-                delay_options = [0.25, 0.5, 0.75]
-            elif section == ShowSection.PRE_FINALE:
-                # Pre-finale - faster
-                delay_options = [0.25, 0.5]
-            else:  # Finale
-                # Finale - fastest
-                delay_options = [0.25, 0.5]
-
-            # Select a delay from the appropriate options
-            delay = random.choice(delay_options)
-
-        # Create the formatted cue for the table
-        cue = [
-            self.current_cue_number,  # Cue number
-            cue_type,  # Cue type
-            outputs_str,  # Outputs string
-            delay,  # Delay (0 for SHOT types)
-            formatted_time  # Execute time
-        ]
-
-        # Increment cue number for next cue
-        self.current_cue_number += 1
-
-        return cue
-
-    def _get_outputs_for_cue_type(self, section: ShowSection, cue_type: str,
-                                  available_outputs: int) -> int:
-        """
-        Determine how many outputs to use for a specific cue type in a section
-
-        Args:
-            section: Show section
-            cue_type: Type of cue
-            available_outputs: Number of outputs available
-
-        Returns:
-            Number of outputs to use for this cue
-        """
-        if "SINGLE SHOT" == cue_type:
-            return 1
-        elif "DOUBLE SHOT" == cue_type:
-            return 2 if available_outputs >= 2 else 0
-
-        # No other cue types are supported
-        return 0
-
-    def _get_unique_outputs(self, num_outputs: int) -> List[int]:
-        """
-        Get a list of unique output numbers that haven't been used yet, in sequential order
-
-        Args:
-            num_outputs: Number of unique outputs needed
-
-        Returns:
-            List of unique output numbers in sequential order, or empty list if not enough are available
-        """
-        # Find available outputs (1-1000 that are not already used)
-        available_outputs = [i for i in range(1, 1001) if i not in self.used_outputs]
-
-        # Sort the available outputs to ensure sequential selection
-        available_outputs.sort()
-
-        # If not enough outputs available, return empty list
-        if len(available_outputs) < num_outputs:
             return []
 
-        # Select the first num_outputs in sequential order
-        selected_outputs = available_outputs[:num_outputs]
+        # For false finale, we'll create a sequence with:
+        # 1. Initial build-up (40% of outputs)
+        # 2. Brief pause
+        # 3. Intense finale (60% of outputs)
 
-        # Mark these outputs as used
-        self.used_outputs.update(selected_outputs)
+        cues = []
 
-        return selected_outputs
+        # Calculate outputs for each part
+        buildup_output_count = int(len(outputs) * 0.4)
+        finale_output_count = len(outputs) - buildup_output_count
 
-    def _format_outputs_string(self, cue_type: str, outputs: List[int]) -> str:
+        buildup_outputs = outputs[:buildup_output_count]
+        finale_outputs = outputs[buildup_output_count:]
+
+        # Calculate durations
+        buildup_duration = duration * 0.3
+        pause_duration = 2.0  # 2 second pause
+        finale_duration = duration - buildup_duration - pause_duration
+
+        # Generate build-up cues
+        buildup_cues = self._generate_regular_cues(
+            act_key="false_finale",
+            shot_type=shot_type,
+            outputs=buildup_outputs,
+            start_time=start_time,
+            duration=buildup_duration,
+            shot_config=shot_config
+        )
+
+        cues.extend(buildup_cues)
+
+        # Generate finale cues with gallop pattern
+        finale_cues = self._generate_effect_sequence(
+            act_key="finale",
+            shot_type=shot_type,
+            effect_type="Gallop",
+            outputs=finale_outputs,
+            start_time=start_time + buildup_duration + pause_duration,
+            duration=finale_duration,
+            shot_config=shot_config
+        )
+
+        cues.extend(finale_cues)
+
+        return cues
+
+    def _generate_enhanced_regular_cues(self, act_key: str, shot_type: str, outputs: List[int],
+                                        start_time: float, duration: float,
+                                        shot_config: Dict, min_delay: float = None, max_delay: float = None) -> List[
+        List]:
         """
-        Format outputs into the appropriate string format for the cue table
+        Generate enhanced regular cues with user parameters
 
         Args:
-            cue_type: Type of cue
-            outputs: List of output numbers
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('single', 'double', etc.)
+            outputs: List of outputs to use
+            start_time: Start time for the cues
+            duration: Duration for the cues
+            shot_config: Configuration for the shot
+            min_delay: Minimum delay between cues (optional)
+            max_delay: Maximum delay between cues (optional)
 
         Returns:
-            Formatted string representation of outputs
+            List of cues
         """
-        if "DOUBLE SHOT" == cue_type:
-            # Format as two outputs separated by comma
-            return f"{outputs[0]}, {outputs[1]}"
-        else:  # SINGLE SHOT
-            # Single output
-            return str(outputs[0])
+        # If min_delay and max_delay are provided, update shot_config
+        if min_delay is not None:
+            shot_config = shot_config.copy()  # Create a copy to avoid modifying the original
+            shot_config["min_delay"] = min_delay
+
+        if max_delay is not None:
+            shot_config = shot_config.copy() if "min_delay" not in shot_config else shot_config
+            shot_config["max_delay"] = max_delay
+
+        # Pass updated shot_config to the underlying method
+        return self._generate_regular_cues(act_key, shot_type, outputs, start_time, duration, shot_config)
+
+    def _generate_regular_cues(self, act_key: str, shot_type: str, outputs: List[int],
+                               start_time: float, duration: float,
+                               shot_config: Dict) -> List[List]:
+        """
+        Generate regular cues without special effects
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+            outputs: List of outputs to use
+            start_time: Start time in seconds
+            duration: Duration in seconds
+            shot_config: Configuration for this shot type
+
+        Returns:
+            List of cues
+        """
+        if not outputs:
+            return []
+
+        # Filter out outputs that have already been used to prevent duplicates
+        unused_outputs = [output for output in outputs if output not in self.used_outputs]
+
+        # If all outputs have been used, return empty list
+        if not unused_outputs:
+            return []
+
+        cues = []
+        current_time = start_time
+
+        # Calculate delay between cues
+        min_delay = self.DELAY_BETWEEN_CUES[act_key]["min"]
+        max_delay = self.DELAY_BETWEEN_CUES[act_key]["max"]
+
+        # For run types, get delay range from shot config
+        if shot_type in ["SINGLE RUN", "DOUBLE RUN"]:
+            run_min_delay = shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"])
+            run_max_delay = shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+
+        # Adjust delay to fit all cues within duration
+        if shot_type == "SINGLE SHOT":
+            # Each cue uses 1 output
+            cues_needed = len(unused_outputs)
+        elif shot_type == "DOUBLE SHOT":
+            # Each cue uses 2 outputs
+            cues_needed = math.ceil(len(unused_outputs) / 2)
+        elif shot_type == "SINGLE RUN":
+            # Estimate average outputs per run
+            avg_outputs = (self.SINGLE_RUN_OUTPUTS[act_key]["min"] + self.SINGLE_RUN_OUTPUTS[act_key]["max"]) / 2
+            cues_needed = math.ceil(len(unused_outputs) / avg_outputs)
+        else:  # DOUBLE RUN
+            # Estimate average output pairs per run
+            avg_pairs = (self.DOUBLE_RUN_OUTPUTS[act_key]["min"] + self.DOUBLE_RUN_OUTPUTS[act_key]["max"]) / 2
+            cues_needed = math.ceil(len(unused_outputs) / (avg_pairs * 2))
+
+        # Ensure we don't divide by zero
+        if cues_needed > 0:
+            # Calculate time per cue to ensure we fit all cues within the duration
+            time_per_cue = duration / cues_needed
+            # Adjust delays to ensure all cues fit
+            avg_delay = min(time_per_cue * 0.5, (min_delay + max_delay) / 2)
+            min_delay = min(min_delay, avg_delay * 0.8)
+            max_delay = min(max_delay, avg_delay * 1.2)
+
+        # Generate cues
+        outputs_index = 0
+        max_iterations = len(unused_outputs) * 2  # Safety limit to prevent infinite loops
+        iteration_count = 0
+
+        while outputs_index < len(outputs) and iteration_count < max_iterations:
+            if shot_type == "SINGLE SHOT":
+                # Create cue
+                cue = [
+                    self.current_cue_number,
+                    "SINGLE SHOT",
+                    str(outputs[outputs_index]),
+                    0,  # No delay for SINGLE SHOT
+                    self._format_time(current_time)
+                ]
+                cues.append(cue)
+                self.current_cue_number += 1
+                self.used_outputs.add(outputs[outputs_index])  # Mark output as used
+                outputs_index += 1
+
+            elif shot_type == "DOUBLE SHOT" and outputs_index + 1 < len(outputs):
+                # Create cue
+                cue = [
+                    self.current_cue_number,
+                    "DOUBLE SHOT",
+                    f"{outputs[outputs_index]}, {outputs[outputs_index + 1]}",
+                    0,  # No delay for DOUBLE SHOT
+                    self._format_time(current_time)
+                ]
+                cues.append(cue)
+                self.current_cue_number += 1
+                self.used_outputs.add(outputs[outputs_index])  # Mark first output as used
+                self.used_outputs.add(outputs[outputs_index + 1])  # Mark second output as used
+                outputs_index += 2
+
+            elif shot_type == "SINGLE RUN":
+                # Determine number of outputs for this run
+                run_outputs = min(
+                    random.randint(
+                        self.SINGLE_RUN_OUTPUTS[act_key]["min"],
+                        self.SINGLE_RUN_OUTPUTS[act_key]["max"]
+                    ),
+                    len(outputs) - outputs_index
+                )
+
+                # Ensure we have at least 2 outputs for a run
+                run_outputs = max(2, run_outputs)
+
+                if outputs_index + run_outputs <= len(outputs):
+                    # Get outputs for this run
+                    run_output_list = outputs[outputs_index:outputs_index + run_outputs]
+
+                    # Create cue with all outputs in the chain
+                    outputs_str = ", ".join(map(str, run_output_list))
+
+                    # Get delay from shot config or use default
+                    delay = random.uniform(
+                        shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                        shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                    )
+
+                    # Round delay to nearest increment
+                    increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                    delay = round(delay / increment) * increment
+
+                    cue = [
+                        self.current_cue_number,
+                        "SINGLE RUN",
+                        outputs_str,
+                        delay,
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+
+                    # Mark outputs as used
+                    for output in run_output_list:
+                        self.used_outputs.add(output)
+
+                    outputs_index += run_outputs
+                else:
+                    # Not enough outputs left for a run, create a single shot
+                    cue = [
+                        self.current_cue_number,
+                        "SINGLE SHOT",
+                        str(outputs[outputs_index]),
+                        0,  # No delay for SINGLE SHOT
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+                    self.used_outputs.add(outputs[outputs_index])  # Mark output as used
+                    outputs_index += 1
+
+            elif shot_type == "DOUBLE RUN" and outputs_index + 1 < len(outputs):
+                # Determine number of output pairs for this run
+                run_pairs = min(
+                    random.randint(
+                        self.DOUBLE_RUN_OUTPUTS[act_key]["min"],
+                        self.DOUBLE_RUN_OUTPUTS[act_key]["max"]
+                    ),
+                    (len(outputs) - outputs_index) // 2
+                )
+
+                # Ensure we have at least 1 pair for a run
+                run_pairs = max(1, run_pairs)
+
+                if outputs_index + run_pairs * 2 <= len(outputs):
+                    # Get all outputs for this run
+                    run_outputs = outputs[outputs_index:outputs_index + run_pairs * 2]
+
+                    # Format all outputs as a comma-separated list
+                    outputs_str = ", ".join(map(str, run_outputs))
+
+                    # Get delay from shot config or use default
+                    delay = random.uniform(
+                        shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                        shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                    )
+
+                    # Round delay to nearest increment
+                    increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                    delay = round(delay / increment) * increment
+
+                    cue = [
+                        self.current_cue_number,
+                        "DOUBLE RUN",
+                        outputs_str,
+                        delay,
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+
+                    # Mark outputs as used
+                    for output in run_outputs:
+                        self.used_outputs.add(output)
+
+                    outputs_index += run_pairs * 2
+                else:
+                    # Not enough outputs left for a double run, create a double shot
+                    cue = [
+                        self.current_cue_number,
+                        "DOUBLE SHOT",
+                        f"{outputs[outputs_index]}, {outputs[outputs_index + 1]}",
+                        0,  # No delay for DOUBLE SHOT
+                        self._format_time(current_time)
+                    ]
+                    cues.append(cue)
+                    self.current_cue_number += 1
+                    self.used_outputs.add(outputs[outputs_index])  # Mark first output as used
+                    self.used_outputs.add(outputs[outputs_index + 1])  # Mark second output as used
+                    outputs_index += 2
+
+            # Calculate delay to next cue
+            delay = random.uniform(min_delay, max_delay)
+
+            # Round delay to nearest increment
+            increment = self.DELAY_BETWEEN_CUES[act_key]["increment"]
+            # Safety check to prevent division by zero or very small values
+            if increment > 0.001:  # Ensure increment is not too small
+                delay = round(delay / increment) * increment
+            else:
+                delay = min_delay  # Fallback to minimum delay
+
+            current_time += delay
+
+            # Increment iteration counter to prevent infinite loops
+            iteration_count += 1
+
+        # If we have remaining outputs and we're out of time, add them at the end
+        if outputs_index < len(outputs):
+            remaining_outputs = outputs[outputs_index:]
+
+            # If we hit the iteration limit, log a warning
+            if iteration_count >= max_iterations:
+                print(f"WARNING: Reached maximum iterations ({max_iterations}) in _generate_regular_cues. " +
+                      f"Adding {len(remaining_outputs)} remaining outputs at the end.")
+
+            if shot_type == "SINGLE SHOT":
+                # Add remaining outputs as single shots at the end
+                for output in remaining_outputs:
+                    if output not in self.used_outputs:  # Only use outputs that haven't been used
+                        cue = [
+                            self.current_cue_number,
+                            "SINGLE SHOT",
+                            str(output),
+                            0,  # No delay for SINGLE SHOT
+                            self._format_time(current_time)
+                        ]
+                        cues.append(cue)
+                        self.current_cue_number += 1
+                        self.used_outputs.add(output)  # Mark output as used
+                        current_time += min_delay
+
+            elif shot_type == "DOUBLE SHOT":
+                # Add remaining outputs as double shots at the end
+                for i in range(0, len(remaining_outputs), 2):
+                    if i + 1 < len(remaining_outputs):
+                        # Check if both outputs are unused
+                        if remaining_outputs[i] not in self.used_outputs and remaining_outputs[
+                            i + 1] not in self.used_outputs:
+                            cue = [
+                                self.current_cue_number,
+                                "DOUBLE SHOT",
+                                f"{remaining_outputs[i]}, {remaining_outputs[i + 1]}",
+                                0,  # No delay for DOUBLE SHOT
+                                self._format_time(current_time)
+                            ]
+                            cues.append(cue)
+                            self.current_cue_number += 1
+                            self.used_outputs.add(remaining_outputs[i])  # Mark first output as used
+                            self.used_outputs.add(remaining_outputs[i + 1])  # Mark second output as used
+                            current_time += min_delay
+                    else:
+                        # Odd number of outputs, add the last one as a single shot if unused
+                        if remaining_outputs[i] not in self.used_outputs:
+                            cue = [
+                                self.current_cue_number,
+                                "SINGLE SHOT",
+                                str(remaining_outputs[i]),
+                                0,  # No delay for SINGLE SHOT
+                                self._format_time(current_time)
+                            ]
+                            cues.append(cue)
+                            self.current_cue_number += 1
+                            self.used_outputs.add(remaining_outputs[i])  # Mark output as used
+                            current_time += min_delay
+
+            elif shot_type == "SINGLE RUN":
+                # Filter out used outputs
+                unused_remaining_outputs = [output for output in remaining_outputs if output not in self.used_outputs]
+
+                # Ensure we have at least 2 outputs for a run
+                if len(unused_remaining_outputs) < 2:
+                    return cues
+
+                # Add remaining outputs as a single run at the end
+                outputs_str = ", ".join(map(str, unused_remaining_outputs))
+
+                # Get delay from shot config or use default
+                delay = random.uniform(
+                    shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                    shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                )
+
+                # Round delay to nearest increment
+                increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                delay = round(delay / increment) * increment
+
+                cue = [
+                    self.current_cue_number,
+                    "SINGLE RUN",
+                    outputs_str,
+                    delay,
+                    self._format_time(current_time)
+                ]
+                cues.append(cue)
+                self.current_cue_number += 1
+
+                # Mark outputs as used
+                for output in unused_remaining_outputs:
+                    self.used_outputs.add(output)
+
+            elif shot_type == "DOUBLE RUN":
+                # Filter out used outputs
+                unused_remaining_outputs = [output for output in remaining_outputs if output not in self.used_outputs]
+
+                # Ensure we have an even number of outputs for DOUBLE RUN (must be pairs)
+                if len(unused_remaining_outputs) % 2 != 0:
+                    unused_remaining_outputs = unused_remaining_outputs[:-1]
+
+                # Ensure we have at least 2 outputs (1 pair) for a double run
+                if len(unused_remaining_outputs) < 2:
+                    return cues
+
+                # Format all outputs as a comma-separated list
+                outputs_str = ", ".join(map(str, unused_remaining_outputs))
+
+                # Get delay from shot config or use default
+                delay = random.uniform(
+                    shot_config.get("min_delay", self.RUN_DELAY_RANGES[act_key]["min"]),
+                    shot_config.get("max_delay", self.RUN_DELAY_RANGES[act_key]["max"])
+                )
+
+                # Round delay to nearest increment
+                increment = self.RUN_DELAY_RANGES[act_key]["increment"]
+                delay = round(delay / increment) * increment
+
+                cue = [
+                    self.current_cue_number,
+                    "DOUBLE RUN",
+                    outputs_str,
+                    delay,
+                    self._format_time(current_time)
+                ]
+                cues.append(cue)
+                self.current_cue_number += 1
+
+                # Mark outputs as used
+                for output in unused_remaining_outputs:
+                    self.used_outputs.add(output)
+
+        return cues
+
+    def _evaluate_generation(self) -> float:
+        """
+        Evaluate the quality of the current generation
+
+        Returns:
+            Score from 0 to 100, where 100 is perfect
+        """
+        score = 100.0
+
+        # Check if all outputs are used
+        used_outputs = self._get_used_outputs()
+        if len(used_outputs) != self.total_outputs:
+            # Penalize for missing outputs
+            missing_outputs = self.total_outputs - len(used_outputs)
+            score -= (missing_outputs / self.total_outputs) * 50
+
+        # Check if outputs are used in the correct acts
+        for act, outputs in self.act_outputs.items():
+            act_used_outputs = self._get_act_used_outputs(act)
+
+            # Check if all outputs for this act are used
+            if len(act_used_outputs) != len(outputs):
+                # Penalize for missing outputs in this act
+                missing_outputs = len(outputs) - len(act_used_outputs)
+                score -= (missing_outputs / len(outputs)) * 10
+
+            # Check if outputs are used in the correct shot types
+            for shot_type, shot_outputs in self.shot_type_outputs[act].items():
+                shot_type_used_outputs = self._get_shot_type_used_outputs(act, shot_type)
+
+                # Check if all outputs for this shot type are used
+                if len(shot_type_used_outputs) != len(shot_outputs):
+                    # Penalize for missing outputs in this shot type
+                    missing_outputs = len(shot_outputs) - len(shot_type_used_outputs)
+                    score -= (missing_outputs / len(shot_outputs)) * 5
+
+        # Check if run types have the correct number of outputs
+        for cue in self.cues:
+            cue_type = cue[1]
+            outputs_str = cue[2]
+
+            if cue_type == "SINGLE RUN":
+                # Count outputs in this run
+                outputs = outputs_str.split(",")
+
+                # Find which act this cue belongs to
+                act_key = None
+                for act in ["opening", "buildup", "finale"]:
+                    if self._is_cue_in_act(act, cue):
+                        act_key = act
+                        break
+
+                if act_key:
+                    # Check if the number of outputs is within the allowed range
+                    min_outputs = self.SINGLE_RUN_OUTPUTS[act_key]["min"]
+                    max_outputs = self.SINGLE_RUN_OUTPUTS[act_key]["max"]
+
+                    if len(outputs) < min_outputs:
+                        # Penalize for too few outputs in this run
+                        score -= 2
+                    elif len(outputs) > max_outputs:
+                        # Penalize for too many outputs in this run
+                        score -= 2
+
+            elif cue_type == "DOUBLE RUN":
+                # Count outputs in this run
+                outputs = outputs_str.split(",")
+
+                # Find which act this cue belongs to
+                act_key = None
+                for act in ["opening", "buildup", "finale"]:
+                    if self._is_cue_in_act(act, cue):
+                        act_key = act
+                        break
+
+                if act_key:
+                    # Check if the number of outputs is even (should be pairs)
+                    if len(outputs) % 2 != 0:
+                        # Penalize for odd number of outputs in DOUBLE RUN
+                        score -= 5
+
+                    # Check if the number of pairs is within the allowed range
+                    pairs = len(outputs) // 2
+                    min_pairs = self.DOUBLE_RUN_OUTPUTS[act_key]["min"]
+                    max_pairs = self.DOUBLE_RUN_OUTPUTS[act_key]["max"]
+
+                    if pairs < min_pairs:
+                        # Penalize for too few pairs in this run
+                        score -= 2
+                    elif pairs > max_pairs:
+                        # Penalize for too many pairs in this run
+                        score -= 2
+
+        # Check if the show duration is correct
+        if self.cues:
+            last_cue_time = self._time_to_seconds(self.cues[-1][4])
+            if abs(last_cue_time - self.total_duration) > 30:  # Allow 30 seconds margin
+                # Penalize for incorrect duration
+                score -= min(10, abs(last_cue_time - self.total_duration) / 10)
+
+        # Ensure score is between 0 and 100
+        return max(0, min(100, score))
+
+    def _get_used_outputs(self) -> Set[int]:
+        """
+        Get all outputs used in the current generation by analyzing the cues
+        This is the definitive source of truth for which outputs are used
+
+        Returns:
+            Set of used output numbers
+        """
+        used_outputs = set()
+
+        for cue in self.cues:
+            outputs_str = cue[2]
+
+            # Handle multiple outputs (comma-separated)
+            if "," in outputs_str:
+                outputs = [int(output.strip()) for output in outputs_str.split(",")]
+                used_outputs.update(outputs)
+            else:
+                # Single output
+                output = int(outputs_str.strip())
+                used_outputs.add(output)
+
+        return used_outputs
+
+    def _get_act_used_outputs(self, act_key: str) -> Set[int]:
+        """
+        Get outputs used in a specific act
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+
+        Returns:
+            Set of used output numbers for this act
+        """
+        used_outputs = set()
+
+        for cue in self.cues:
+            if self._is_cue_in_act(act_key, cue):
+                outputs_str = cue[2]
+
+                # Handle multiple outputs (comma-separated)
+                if "," in outputs_str:
+                    outputs = [int(output.strip()) for output in outputs_str.split(",")]
+                    used_outputs.update(outputs)
+                else:
+                    # Single output
+                    output = int(outputs_str.strip())
+                    used_outputs.add(output)
+
+        return used_outputs
+
+    def _get_shot_type_used_outputs(self, act_key: str, shot_type: str) -> Set[int]:
+        """
+        Get outputs used in a specific shot type within an act
+
+        Args:
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            shot_type: Type of shot ('SINGLE SHOT', 'DOUBLE SHOT', 'SINGLE RUN', 'DOUBLE RUN')
+
+        Returns:
+            Set of used output numbers for this shot type
+        """
+        used_outputs = set()
+
+        for cue in self.cues:
+            if self._is_cue_in_act(act_key, cue) and cue[1] == shot_type:
+                outputs_str = cue[2]
+
+                # Handle multiple outputs (comma-separated)
+                if "," in outputs_str:
+                    outputs = [int(output.strip()) for output in outputs_str.split(",")]
+                    used_outputs.update(outputs)
+                else:
+                    # Single output
+                    output = int(outputs_str.strip())
+                    used_outputs.add(output)
+
+        return used_outputs
+
+    def _verify_generation(self):
+        """Enhanced verification ensuring all outputs are used exactly once and parameters are respected"""
+        if self.debug:
+            print("\n=== ENHANCED GENERATION VERIFICATION ===")
+
+            # Reset the used_outputs set before verification
+            # This ensures we're only counting outputs from the cues, not from the generation process
+            self.used_outputs = set()
+
+            # Get all outputs that should be used
+            all_expected_outputs = set(range(1, self.total_outputs + 1))
+            used_outputs = self._get_used_outputs()
+
+            # CRITICAL CHECK: Ensure all outputs are used exactly once
+            if len(used_outputs) != self.total_outputs:
+                missing = all_expected_outputs - used_outputs
+                extra = used_outputs - all_expected_outputs
+
+                if missing:
+                    print(f"CRITICAL ERROR: Missing {len(missing)} outputs: {sorted(list(missing))}")
+                if extra:
+                    print(f"CRITICAL ERROR: Extra outputs used: {sorted(list(extra))}")
+
+                print(f"FAILED: Expected {self.total_outputs} outputs, got {len(used_outputs)}")
+                return False
+
+            # Verify no duplicate cue numbers
+            cue_numbers = [cue[0] for cue in self.cues]
+            if len(set(cue_numbers)) != len(cue_numbers):
+                duplicates = [num for num in cue_numbers if cue_numbers.count(num) > 1]
+                print(f"CRITICAL ERROR: Duplicate cue numbers: {duplicates}")
+                return False
+
+            print(f"✓ SUCCESS: All {self.total_outputs} outputs used exactly once")
+            print(f"✓ SUCCESS: All cue numbers are unique ({len(cue_numbers)} total)")
+
+            # Verify act-specific output allocation
+            for act, expected_outputs in self.act_outputs.items():
+                act_used_outputs = self._get_act_used_outputs(act)
+                if set(act_used_outputs) == set(expected_outputs):
+                    print(f"✓ {act} act: {len(expected_outputs)} outputs correctly allocated")
+                else:
+                    print(f"ERROR: {act} act output mismatch")
+
+            # Count and display final statistics
+            cue_counts = {"SINGLE SHOT": 0, "DOUBLE SHOT": 0, "SINGLE RUN": 0, "DOUBLE RUN": 0}
+            for cue in self.cues:
+                cue_type = cue[1]
+                if cue_type in cue_counts:
+                    cue_counts[cue_type] += 1
+
+            print("\nFinal Cue Distribution:")
+            total_cues = len(self.cues)
+            for cue_type, count in cue_counts.items():
+                if count > 0:
+                    percentage = (count / total_cues) * 100
+                    print(f"  {cue_type}: {count} ({percentage:.1f}%)")
+
+            # Verify timing
+            if self.cues:
+                last_cue_time = self._time_to_seconds(self.cues[-1][4])
+                timing_error = abs(last_cue_time - self.total_duration)
+
+                print(f"\nTiming Verification:")
+                print(f"  Actual duration: {last_cue_time:.2f}s")
+                print(f"  Target duration: {self.total_duration}s")
+                print(f"  Error: {timing_error:.2f}s")
+
+                if timing_error <= 5.0:  # Allow 5 seconds margin
+                    print("✓ Timing within acceptable range")
+                else:
+                    print("⚠ Timing outside target range")
+
+            print(f"\nGeneration Summary:")
+            print(f"  Total cues: {len(self.cues)}")
+            print(f"  Outputs used: {len(used_outputs)}/{self.total_outputs}")
+            print(f"  Generation attempts: {self.generation_attempts}")
+            print(f"  Generation time: {time.time() - self.generation_start_time:.2f} seconds")
+
+            # Final success indicator
+            success = (len(used_outputs) == self.total_outputs and
+                       len(set(cue_numbers)) == len(cue_numbers))
+            PASSED = "PASSED"
+            FAILED = "FAILED"
+            print(f"✓ VERIFICATION COMPLETE: {PASSED if success else FAILED}")
+
+            return True
 
     def _format_time(self, seconds: float) -> str:
         """
-        Format time in seconds as minutes:seconds.milliseconds
+        Convert seconds to a formatted time string (MM:SS.SS)
 
         Args:
-            seconds: Time in seconds
+            seconds: Time in seconds as a float
 
         Returns:
-            Formatted time string
+            Time string in format MM:SS.SS
         """
         minutes = int(seconds // 60)
         remaining_seconds = seconds % 60
-        return f"{minutes}:{remaining_seconds:05.2f}"
+        return f"{minutes:02d}:{remaining_seconds:06.3f}"
 
     def _time_to_seconds(self, time_str: str) -> float:
         """
@@ -1118,413 +1883,178 @@ class ShowGenerator:
         except (ValueError, TypeError):
             return 0.0
 
-    def _select_weighted_random(self, weighted_dict: Dict[str, int]) -> str:
+    def _is_cue_in_act(self, act_key: str, cue: List) -> bool:
         """
-        Select a random item from a dictionary based on weights
+        Check if a cue belongs to a specific act based on output number
 
         Args:
-            weighted_dict: Dictionary with items as keys and weights as values
+            act_key: Key for the act ('opening', 'buildup', or 'finale')
+            cue: Cue to check
 
         Returns:
-            Randomly selected key
+            True if the cue belongs to the act, False otherwise
         """
-        total_weight = sum(weighted_dict.values())
-        rand_val = random.uniform(0, total_weight)
+        if act_key not in self.act_outputs:
+            return False
 
-        cumulative_weight = 0
-        for item, weight in weighted_dict.items():
-            cumulative_weight += weight
-            if rand_val <= cumulative_weight:
-                return item
+        # Get outputs for this act
+        act_outputs = set(self.act_outputs[act_key])
 
-        # Fallback to first item
-        return list(weighted_dict.keys())[0]
-
-
-class ProfessionalShowGenerator:
-    """
-    Professional-grade firework show generator with advanced choreography features.
-    This class provides expert-level show generation with rhythm patterns,
-    professional styles, and mathematical precision timing.
-    """
-
-    # Professional rhythm patterns with timing data
-    RHYTHM_PATTERNS = {
-        RhythmPattern.DRUMMING_ROCK: {
-            'kick': [1, 0, 0, 0, 1, 0, 0, 0],  # Bass drum (double shots)
-            'snare': [0, 0, 1, 0, 0, 0, 1, 0],  # Snare (single shots)
-            'accent': [1, 0, 0, 0, 1, 0, 0, 1]  # Accent pattern
-        },
-        RhythmPattern.DRUMMING_JAZZ: {
-            'kick': [1, 0, 1, 0, 0, 1, 0, 0],
-            'snare': [0, 0, 0, 1, 0, 0, 1, 0],
-            'accent': [1, 0, 1, 1, 0, 1, 1, 0]
-        },
-        RhythmPattern.GALLOPING: {
-            'pattern': [1, 0, 1, 2, 0, 0, 1, 0, 1, 2, 0, 0],  # Da-da-DUM
-            'accent': [0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0]
-        },
-        RhythmPattern.TROTTING: {
-            'pattern': [1, 0, 1, 0, 1, 0, 1, 0],  # Steady even pace
-            'accent': [1, 0, 0, 0, 1, 0, 0, 0]
-        },
-        RhythmPattern.MARCHING: {
-            'pattern': [2, 0, 1, 0, 2, 0, 1, 0],  # Strong-weak-medium-weak
-            'accent': [1, 0, 0, 0, 1, 0, 0, 0]
-        },
-        RhythmPattern.WALTZ: {
-            'pattern': [2, 0, 0, 1, 0, 0, 1, 0, 0],  # 3/4 time
-            'accent': [1, 0, 0, 0, 0, 0, 0, 0, 0]
-        },
-        RhythmPattern.SWING: {
-            'pattern': [1, 0, 1, 1, 0, 1, 0, 1],  # Swing rhythm
-            'accent': [1, 0, 0, 1, 0, 0, 0, 1]
-        },
-        RhythmPattern.LATIN: {
-            'pattern': [1, 1, 0, 1, 0, 1, 1, 0],  # Latin rhythm
-            'accent': [1, 0, 0, 1, 0, 1, 0, 0]
-        }
-    }
-
-    # Professional show style configurations
-    SHOW_STYLE_CONFIGS = {
-        ShowStyle.CLASSICAL: {
-            'section_weights': {ShowSection.OPENING: 25, ShowSection.BUILDUP: 20,
-                                ShowSection.MAIN_BODY: 25, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 15},
-            'rhythm_preference': RhythmPattern.WALTZ,
-            'complexity_modifier': 0.8,
-            'technical_weight': 0.6,
-            'emotional_weight': 0.8
-        },
-        ShowStyle.ROCK_CONCERT: {
-            'section_weights': {ShowSection.OPENING: 15, ShowSection.BUILDUP: 25,
-                                ShowSection.MAIN_BODY: 30, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 15},
-            'rhythm_preference': RhythmPattern.DRUMMING_ROCK,
-            'complexity_modifier': 1.2,
-            'technical_weight': 0.9,
-            'emotional_weight': 0.7
-        },
-        ShowStyle.PATRIOTIC: {
-            'section_weights': {ShowSection.OPENING: 20, ShowSection.BUILDUP: 20,
-                                ShowSection.MAIN_BODY: 25, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 20},
-            'rhythm_preference': RhythmPattern.MARCHING,
-            'complexity_modifier': 1.0,
-            'technical_weight': 0.7,
-            'emotional_weight': 0.9
-        },
-        ShowStyle.WEDDING: {
-            'section_weights': {ShowSection.OPENING: 30, ShowSection.BUILDUP: 15,
-                                ShowSection.MAIN_BODY: 25, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 15},
-            'rhythm_preference': RhythmPattern.WALTZ,
-            'complexity_modifier': 0.7,
-            'technical_weight': 0.5,
-            'emotional_weight': 1.0
-        },
-        ShowStyle.CORPORATE: {
-            'section_weights': {ShowSection.OPENING: 25, ShowSection.BUILDUP: 20,
-                                ShowSection.MAIN_BODY: 30, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 10},
-            'rhythm_preference': RhythmPattern.MARCHING,
-            'complexity_modifier': 0.9,
-            'technical_weight': 0.8,
-            'emotional_weight': 0.6
-        },
-        ShowStyle.COMPETITION: {
-            'section_weights': {ShowSection.OPENING: 20, ShowSection.BUILDUP: 25,
-                                ShowSection.MAIN_BODY: 25, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 15},
-            'rhythm_preference': RhythmPattern.DRUMMING_JAZZ,
-            'complexity_modifier': 1.5,
-            'technical_weight': 1.0,
-            'emotional_weight': 0.8
-        },
-        ShowStyle.FINALE_HEAVY: {
-            'section_weights': {ShowSection.OPENING: 15, ShowSection.BUILDUP: 15,
-                                ShowSection.MAIN_BODY: 20, ShowSection.PRE_FINALE: 20,
-                                ShowSection.FINALE: 30},
-            'rhythm_preference': RhythmPattern.DRUMMING_ROCK,
-            'complexity_modifier': 1.3,
-            'technical_weight': 0.9,
-            'emotional_weight': 0.8
-        },
-        ShowStyle.TECHNICAL_SHOWCASE: {
-            'section_weights': {ShowSection.OPENING: 20, ShowSection.BUILDUP: 25,
-                                ShowSection.MAIN_BODY: 30, ShowSection.PRE_FINALE: 15,
-                                ShowSection.FINALE: 10},
-            'rhythm_preference': RhythmPattern.DRUMMING_JAZZ,
-            'complexity_modifier': 1.6,
-            'technical_weight': 1.2,
-            'emotional_weight': 0.6
-        },
-        ShowStyle.EMOTIONAL_JOURNEY: {
-            'section_weights': {ShowSection.OPENING: 25, ShowSection.BUILDUP: 20,
-                                ShowSection.MAIN_BODY: 25, ShowSection.PRE_FINALE: 20,
-                                ShowSection.FINALE: 10},
-            'rhythm_preference': RhythmPattern.WALTZ,
-            'complexity_modifier': 0.9,
-            'technical_weight': 0.7,
-            'emotional_weight': 1.2
-        }
-    }
-
-    def __init__(self):
-        """Initialize the professional show generator."""
-        self.reset_generator()
-
-    def reset_generator(self):
-        """Reset the generator state."""
-        self.current_time = 0.0
-        self.used_outputs = set()
-        self.section_cue_counts = {section: 0 for section in ShowSection}
-        self.rhythm_position = 0
-        self.last_cue_time = 0.0
-
-    def generate_professional_show(self, config: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """
-        Generate a professional firework show based on configuration.
-
-        Args:
-            config: Configuration dictionary containing:
-                - duration: Show duration in seconds
-                - num_outputs: Number of available outputs
-                - style: ShowStyle enum value or string
-                - rhythm_pattern: RhythmPattern enum value or string
-                - complexity: ComplexityLevel enum value or string
-                - bpm: Beats per minute (default: 120)
-
-        Returns:
-            List of cue dictionaries with professional timing and choreography
-        """
+        # Get output numbers from cue
+        outputs_str = cue[2]
         try:
-            self.reset_generator()
+            # Handle multiple outputs (comma-separated)
+            outputs = [int(output.strip()) for output in outputs_str.split(",")]
+        except ValueError:
+            return False
 
-            # Extract and validate configuration parameters
-            duration = float(config.get('duration', 180.0))
-            num_outputs = int(config.get('num_outputs', 32))
+        # Check if any output is in this act
+        for output in outputs:
+            if output in act_outputs:
+                return True
 
-            # Handle enum conversion
-            style_val = config.get('style', 'classical')
-            if isinstance(style_val, str):
-                style = ShowStyle(style_val)
-            else:
-                style = style_val
+        return False
 
-            rhythm_val = config.get('rhythm_pattern', 'waltz')
-            if isinstance(rhythm_val, str):
-                rhythm = RhythmPattern(rhythm_val)
-            else:
-                rhythm = rhythm_val
+    def delete_cues_from_table(self, cue_table):
+        """
+        Delete all cues from the cue table
 
-            complexity_val = config.get('complexity', 'medium')
-            if isinstance(complexity_val, str):
-                complexity = ComplexityLevel(complexity_val)
-            else:
-                complexity = complexity_val
+        Args:
+            cue_table: Cue table widget to clear
+        """
+        # Clear the cue table
+        cue_table.setRowCount(0)
 
-            bpm = int(config.get('bpm', 120))
+    def add_cues_to_table(self, cue_table, cues):
+        """
+        Add cues to the cue table
 
-            # Calculate timing parameters
-            beat_duration = 60.0 / bpm  # Duration of one beat in seconds
+        Args:
+            cue_table: Cue table widget to add cues to
+            cues: List of cues to add
+        """
+        # Add each cue to the table
+        for cue in cues:
+            row_position = cue_table.rowCount()
+            cue_table.insertRow(row_position)
 
-            # Get style configuration
-            style_config = self.SHOW_STYLE_CONFIGS.get(style, self.SHOW_STYLE_CONFIGS[ShowStyle.CLASSICAL])
+            # Add cue data to the row
+            for col, value in enumerate(cue):
+                item = QTableWidgetItem(str(value))
+                cue_table.setItem(row_position, col, item)
 
-            # Calculate section durations
-            section_durations = self._calculate_section_durations(duration, style_config)
+    def verify_cues(self, cues):
+        """
+        Verify that cues are valid
 
-            # Generate cues for each section
-            all_cues = []
-            current_time = 0.0
+        Args:
+            cues: List of cues to verify
 
-            for section in ShowSection:
-                section_duration = section_durations[section]
-                if section_duration <= 0:
-                    continue
+        Returns:
+            True if all cues are valid, False otherwise
+        """
+        if not cues:
+            print("Warning: No cues generated")
+            return False
 
-                section_cues = self._generate_section_cues(
-                    section, current_time, section_duration,
-                    num_outputs, style_config, rhythm, beat_duration, complexity
-                )
+        # Check for duplicate outputs
+        used_outputs = set()
+        for cue in cues:
+            outputs_str = cue[2]
+            try:
+                # Handle multiple outputs (comma-separated)
+                outputs = [int(output.strip()) for output in outputs_str.split(",")]
+                for output in outputs:
+                    if output in used_outputs:
+                        print(f"Warning: Output {output} used multiple times")
+                        return False
+                    used_outputs.add(output)
+            except ValueError:
+                print(f"Warning: Invalid output format: {outputs_str}")
+                return False
 
-                all_cues.extend(section_cues)
-                current_time += section_duration
+        # Check for valid cue types
+        valid_cue_types = ["SINGLE SHOT", "DOUBLE SHOT", "SINGLE RUN", "DOUBLE RUN"]
+        for cue in cues:
+            cue_type = cue[1]
+            if cue_type not in valid_cue_types:
+                print(f"Warning: Invalid cue type: {cue_type}")
+                return False
 
-            # Sort cues by time and assign sequential IDs
-            all_cues.sort(key=lambda x: x['time'])
-            for i, cue in enumerate(all_cues, 1):
-                cue['id'] = i
+        # Check for valid delays
+        for cue in cues:
+            try:
+                delay = float(cue[3])
+                if delay < 0:
+                    print(f"Warning: Negative delay: {delay}")
+                    return False
+            except ValueError:
+                print(f"Warning: Invalid delay format: {cue[3]}")
+                return False
 
-            return all_cues
+        # Check for valid execution times
+        for cue in cues:
+            try:
+                self._time_to_seconds(cue[4])
+            except ValueError:
+                print(f"Warning: Invalid execution time format: {cue[4]}")
+                return False
 
-        except Exception as e:
-            print(f"Error generating professional show: {e}")
-            traceback.print_exc()
-            return []
+        # Check for run types with correct number of outputs
+        for cue in cues:
+            cue_type = cue[1]
+            outputs_str = cue[2]
 
-    def _calculate_section_durations(self, total_duration: float, style_config: Dict) -> Dict[ShowSection, float]:
-        """Calculate duration for each show section based on style."""
-        section_weights = style_config['section_weights']
-        total_weight = sum(section_weights.values())
+            if cue_type == "SINGLE RUN":
+                # Count outputs in this run
+                outputs = outputs_str.split(",")
 
-        durations = {}
-        for section, weight in section_weights.items():
-            durations[section] = (weight / total_weight) * total_duration
+                # Find which act this cue belongs to
+                act_key = None
+                for act in ["opening", "buildup", "finale"]:
+                    if self._is_cue_in_act(act, cue):
+                        act_key = act
+                        break
 
-        return durations
+                if act_key:
+                    # Check if the number of outputs is within the allowed range
+                    min_outputs = self.SINGLE_RUN_OUTPUTS[act_key]["min"]
+                    max_outputs = self.SINGLE_RUN_OUTPUTS[act_key]["max"]
 
-    def _generate_section_cues(self, section: ShowSection, start_time: float, duration: float,
-                               num_outputs: int, style_config: Dict, rhythm: RhythmPattern,
-                               beat_duration: float, complexity: ComplexityLevel) -> List[Dict[str, Any]]:
-        """Generate cues for a specific show section."""
-        cues = []
-        current_time = start_time
-        end_time = start_time + duration
+                    if len(outputs) < min_outputs:
+                        print(f"Warning: SINGLE RUN cue has {len(outputs)} outputs, but minimum is {min_outputs}")
+                        return False
+                    elif len(outputs) > max_outputs:
+                        print(f"Warning: SINGLE RUN cue has {len(outputs)} outputs, but maximum is {max_outputs}")
+                        return False
 
-        # Get rhythm pattern
-        rhythm_pattern = self.RHYTHM_PATTERNS.get(rhythm, self.RHYTHM_PATTERNS[RhythmPattern.WALTZ])
+            elif cue_type == "DOUBLE RUN":
+                # Count outputs in this run
+                outputs = outputs_str.split(",")
 
-        # Calculate complexity multiplier
-        complexity_multipliers = {
-            ComplexityLevel.SIMPLE: 0.7,
-            ComplexityLevel.MEDIUM: 1.0,
-            ComplexityLevel.COMPLEX: 1.3,
-            ComplexityLevel.EXPERT: 1.6
-        }
-        complexity_mult = complexity_multipliers.get(complexity, 1.0)
+                # Find which act this cue belongs to
+                act_key = None
+                for act in ["opening", "buildup", "finale"]:
+                    if self._is_cue_in_act(act, cue):
+                        act_key = act
+                        break
 
-        # Determine cue frequency based on section and style
-        base_frequency = self._get_section_frequency(section, style_config) * complexity_mult
+                if act_key:
+                    # Check if the number of outputs is even (should be pairs)
+                    if len(outputs) % 2 != 0:
+                        print(f"Warning: DOUBLE RUN cue has odd number of outputs: {len(outputs)}")
+                        return False
 
-        while current_time < end_time:
-            # Generate cue based on rhythm pattern
-            cue = self._generate_rhythm_cue(
-                current_time, section, rhythm_pattern, num_outputs, style_config
-            )
+                    # Check if the number of pairs is within the allowed range
+                    pairs = len(outputs) // 2
+                    min_pairs = self.DOUBLE_RUN_OUTPUTS[act_key]["min"]
+                    max_pairs = self.DOUBLE_RUN_OUTPUTS[act_key]["max"]
 
-            if cue:
-                cues.append(cue)
+                    if pairs < min_pairs:
+                        print(f"Warning: DOUBLE RUN cue has {pairs} pairs, but minimum is {min_pairs}")
+                        return False
+                    elif pairs > max_pairs:
+                        print(f"Warning: DOUBLE RUN cue has {pairs} pairs, but maximum is {max_pairs}")
+                        return False
 
-            # Calculate next cue time based on rhythm and section
-            time_advance = self._calculate_time_advance(
-                section, rhythm_pattern, beat_duration, base_frequency
-            )
-            current_time += time_advance
-
-        return cues
-
-    def _get_section_frequency(self, section: ShowSection, style_config: Dict) -> float:
-        """Get the base frequency multiplier for a section."""
-        frequency_map = {
-            ShowSection.OPENING: 0.8,
-            ShowSection.BUILDUP: 1.2,
-            ShowSection.MAIN_BODY: 1.0,
-            ShowSection.PRE_FINALE: 1.4,
-            ShowSection.FINALE: 2.0
-        }
-
-        base_freq = frequency_map.get(section, 1.0)
-        return base_freq * style_config.get('complexity_modifier', 1.0)
-
-    def _generate_rhythm_cue(self, time: float, section: ShowSection, rhythm_pattern: Dict,
-                             num_outputs: int, style_config: Dict) -> Optional[Dict[str, Any]]:
-        """Generate a cue based on rhythm pattern."""
-        # Determine shot type based on rhythm pattern
-        if 'pattern' in rhythm_pattern:
-            pattern = rhythm_pattern['pattern']
-            pattern_pos = self.rhythm_position % len(pattern)
-            shot_intensity = pattern[pattern_pos]
-        else:
-            # For drum patterns, combine kick and snare
-            kick_pattern = rhythm_pattern.get('kick', [1])
-            snare_pattern = rhythm_pattern.get('snare', [0])
-            pattern_pos = self.rhythm_position % max(len(kick_pattern), len(snare_pattern))
-
-            kick_val = kick_pattern[pattern_pos % len(kick_pattern)]
-            snare_val = snare_pattern[pattern_pos % len(snare_pattern)]
-            shot_intensity = max(kick_val, snare_val) + (kick_val * snare_val)
-
-        self.rhythm_position += 1
-
-        # Skip if no shot at this position
-        if shot_intensity == 0:
-            return None
-
-        # Select output(s) based on intensity and section
-        outputs = self._select_outputs_for_intensity(shot_intensity, num_outputs, section)
-
-        # Create cue dictionary
-        cue = {
-            'time': round(time, 2),
-            'output': outputs[0] if len(outputs) == 1 else outputs,
-            'description': self._generate_cue_description(section, shot_intensity, len(outputs)),
-            'effect': self._select_effect_for_section(section, style_config),
-            'intensity': shot_intensity,
-            'section': section.name
-        }
-
-        return cue
-
-    def _select_outputs_for_intensity(self, intensity: int, num_outputs: int, section: ShowSection) -> List[int]:
-        """Select output numbers based on shot intensity."""
-        if intensity == 1:
-            # Single shot
-            return [random.randint(1, num_outputs)]
-        elif intensity == 2:
-            # Double shot
-            outputs = random.sample(range(1, num_outputs + 1), min(2, num_outputs))
-            return sorted(outputs)
-        else:
-            # Multiple shots for higher intensity
-            count = min(intensity, num_outputs // 2)
-            outputs = random.sample(range(1, num_outputs + 1), count)
-            return sorted(outputs)
-
-    def _calculate_time_advance(self, section: ShowSection, rhythm_pattern: Dict,
-                                beat_duration: float, frequency: float) -> float:
-        """Calculate time advance to next cue."""
-        base_advance = beat_duration / frequency
-
-        # Add some variation based on section
-        if section == ShowSection.FINALE:
-            variation = random.uniform(0.8, 1.2)
-        else:
-            variation = random.uniform(0.9, 1.1)
-
-        return base_advance * variation
-
-    def _generate_cue_description(self, section: ShowSection, intensity: int, output_count: int) -> str:
-        """Generate a descriptive name for the cue."""
-        section_names = {
-            ShowSection.OPENING: "Opening",
-            ShowSection.BUILDUP: "Buildup",
-            ShowSection.MAIN_BODY: "Main",
-            ShowSection.PRE_FINALE: "Pre-Finale",
-            ShowSection.FINALE: "Finale"
-        }
-
-        intensity_names = {1: "Single", 2: "Double", 3: "Triple"}
-        intensity_name = intensity_names.get(intensity, "Multi")
-
-        section_name = section_names.get(section, "Show")
-
-        if output_count == 1:
-            return f"{section_name} {intensity_name} Shot"
-        else:
-            return f"{section_name} {intensity_name} Burst ({output_count})"
-
-    def _select_effect_for_section(self, section: ShowSection, style_config: Dict) -> str:
-        """Select an appropriate effect for the section and style."""
-        effects_by_section = {
-            ShowSection.OPENING: ["Red Peony", "Blue Chrysanthemum", "Gold Willow", "Silver Fountain"],
-            ShowSection.BUILDUP: ["Green Palm", "Purple Dahlia", "Orange Burst", "White Strobe"],
-            ShowSection.MAIN_BODY: ["Multi-Color Burst", "Crackling Willow", "Glittering Palm", "Color-Changing Peony"],
-            ShowSection.PRE_FINALE: ["Titanium Salute", "Crackling Comet", "Glitter Burst", "Thunder King"],
-            ShowSection.FINALE: ["Brocade Crown", "Chrysanthemum Kamuro", "Titanium Willow", "Multi-Break Shell"]
-        }
-
-        section_effects = effects_by_section.get(section, effects_by_section[ShowSection.MAIN_BODY])
-        return random.choice(section_effects)
+        return True

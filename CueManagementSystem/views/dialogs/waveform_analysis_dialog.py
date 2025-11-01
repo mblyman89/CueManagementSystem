@@ -1099,6 +1099,17 @@ class WaveformAnalysisDialog(QDialog):
             self.logger.error("No valid music file information provided")
             return
 
+        print(f"🔊 load_waveform_data: Using file path from music_file_info: {self.music_file_info['path']}")
+
+        # Print additional info about the music_file_info dictionary
+        print(f"🔊 load_waveform_data: music_file_info keys: {self.music_file_info.keys()}")
+        if 'is_separated' in self.music_file_info:
+            print(f"🔊 load_waveform_data: is_separated: {self.music_file_info['is_separated']}")
+        if 'is_drum_stem' in self.music_file_info:
+            print(f"🔊 load_waveform_data: is_drum_stem: {self.music_file_info['is_drum_stem']}")
+        if 'original_file' in self.music_file_info:
+            print(f"🔊 load_waveform_data: original_file: {self.music_file_info['original_file']}")
+
         file_path = Path(self.music_file_info['path'])
         if not file_path.exists():
             self.logger.error(f"File not found: {file_path}")
@@ -1230,6 +1241,7 @@ class WaveformAnalysisDialog(QDialog):
                 self._update_duration_display()
 
                 # Set up media player
+                print(f"🔊 _on_waveform_loaded: About to set up media player with music_file_info path: {self.music_file_info['path'] if self.music_file_info and 'path' in self.music_file_info else 'No path'}")
                 self._setup_media_player()
 
                 # Force initial peak display
@@ -1317,10 +1329,46 @@ class WaveformAnalysisDialog(QDialog):
         if not self.music_file_info or 'path' not in self.music_file_info:
             return
 
+        # Use the path directly from music_file_info - this ensures we play the correct file
+        # (drum stem or original file)
         file_path = Path(self.music_file_info['path'])
+        print(f"🔊 _setup_media_player: Setting media source to {file_path}")
+
+        # Print additional info about the music_file_info dictionary
+        print(f"🔊 _setup_media_player: music_file_info keys: {self.music_file_info.keys()}")
+        if 'is_separated' in self.music_file_info:
+            print(f"🔊 _setup_media_player: is_separated: {self.music_file_info['is_separated']}")
+        if 'is_drum_stem' in self.music_file_info:
+            print(f"🔊 _setup_media_player: is_drum_stem: {self.music_file_info['is_drum_stem']}")
+        if 'original_file' in self.music_file_info:
+            print(f"🔊 _setup_media_player: original_file: {self.music_file_info['original_file']}")
+
+        # Verify that the file exists
+        if not file_path.exists():
+            # If the file doesn't exist but we have an original_file, check if that exists
+            if 'original_file' in self.music_file_info and Path(self.music_file_info['original_file']).exists():
+                print(f"🔊 _setup_media_player: File not found, but original_file exists. Using original_file instead.")
+                file_path = Path(self.music_file_info['original_file'])
+            else:
+                print(f"🔊 _setup_media_player: File not found and no original_file available.")
+                return
+
+        # Double-check that we're using the correct file for playback
+        # If this is a separated drum stem, make sure we're using the drum stem file
+        if ('is_separated' in self.music_file_info and self.music_file_info['is_separated']) or \
+           ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
+            print(f"🔊 _setup_media_player: This is a separated drum stem, ensuring we use the correct file for playback")
+            # Make sure file_path is the path from music_file_info, not the original file
+            file_path = Path(self.music_file_info['path'])
+            print(f"🔊 _setup_media_player: Using drum stem file path: {file_path}")
+            if not file_path.exists():
+                print(f"🔊 _setup_media_player: Drum stem file not found.")
+                return
+
         if file_path.exists():
             self.player.setSource(QUrl.fromLocalFile(str(file_path)))
             self.audio_output.setVolume(1.0)
+            print(f"🔊 _setup_media_player: Media source set successfully")
 
     def _force_peak_display(self) -> None:
         """ENHANCED: Force update of peak detection display with separate counters"""
@@ -2400,13 +2448,46 @@ class WaveformAnalysisDialog(QDialog):
 
         # If starting fresh or after stop
         if self.player.source().isEmpty() or self.player.playbackState() == QMediaPlayer.StoppedState:
+            # Get the file path from music_file_info
             file_path = Path(self.music_file_info['path'])
-            if not file_path.exists():
-                self._show_warning_message("Error", "Audio file not found.")
-                return
+            print(f"🔊 _on_play: Using file path from music_file_info: {file_path}")
 
+            # Print additional info about the music_file_info dictionary
+            print(f"🔊 _on_play: music_file_info keys: {self.music_file_info.keys()}")
+            if 'is_separated' in self.music_file_info:
+                print(f"🔊 _on_play: is_separated: {self.music_file_info['is_separated']}")
+            if 'is_drum_stem' in self.music_file_info:
+                print(f"🔊 _on_play: is_drum_stem: {self.music_file_info['is_drum_stem']}")
+            if 'original_file' in self.music_file_info:
+                print(f"🔊 _on_play: original_file: {self.music_file_info['original_file']}")
+
+            # Verify that the file exists
+            if not file_path.exists():
+                # If the file doesn't exist but we have an original_file, check if that exists
+                if 'original_file' in self.music_file_info and Path(self.music_file_info['original_file']).exists():
+                    print(f"🔊 _on_play: File not found, but original_file exists. Using original_file instead.")
+                    file_path = Path(self.music_file_info['original_file'])
+                else:
+                    self._show_warning_message("Error", "Audio file not found.")
+                    return
+
+            # Double-check that we're using the correct file for playback
+            # If this is a separated drum stem, make sure we're using the drum stem file
+            if ('is_separated' in self.music_file_info and self.music_file_info['is_separated']) or \
+               ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
+                print(f"🔊 _on_play: This is a separated drum stem, ensuring we use the correct file for playback")
+                # Make sure file_path is the path from music_file_info, not the original file
+                file_path = Path(self.music_file_info['path'])
+                print(f"🔊 _on_play: Using drum stem file path: {file_path}")
+                if not file_path.exists():
+                    self._show_warning_message("Error", "Drum stem file not found.")
+                    return
+
+            # Use the path from music_file_info which will be the drum stem path if is_drum_stem is True
+            print(f"🔊 _on_play: Setting media source to {file_path}")
             self.player.setSource(QUrl.fromLocalFile(str(file_path)))
             self.audio_output.setVolume(1.0)
+            print(f"🔊 _on_play: Media source set successfully")
 
             # Set position based on waveform view
             position_ms = int(self.waveform_view.current_position * self.analyzer.duration_seconds * 1000)
@@ -2904,6 +2985,27 @@ class WaveformAnalysisDialog(QDialog):
     def set_analyzer(self, analyzer: WaveformAnalyzer) -> None:
         """Set the analyzer instance and update the view with optimizations"""
         print(f"🎵 Setting analyzer in OptimizedWaveformAnalysisDialog")
+
+        # Print analyzer file path if available
+        if hasattr(analyzer, 'file_path') and analyzer.file_path:
+            print(f"🔊 set_analyzer: Analyzer file path: {analyzer.file_path}")
+        else:
+            print(f"🔊 set_analyzer: Analyzer does not have a file path set yet")
+
+        # Print music_file_info path for comparison
+        if hasattr(self, 'music_file_info') and self.music_file_info and 'path' in self.music_file_info:
+            print(f"🔊 set_analyzer: music_file_info path: {self.music_file_info['path']}")
+
+            # Print additional info about the music_file_info dictionary
+            print(f"🔊 set_analyzer: music_file_info keys: {self.music_file_info.keys()}")
+            if 'is_separated' in self.music_file_info:
+                print(f"🔊 set_analyzer: is_separated: {self.music_file_info['is_separated']}")
+            if 'is_drum_stem' in self.music_file_info:
+                print(f"🔊 set_analyzer: is_drum_stem: {self.music_file_info['is_drum_stem']}")
+            if 'original_file' in self.music_file_info:
+                print(f"🔊 set_analyzer: original_file: {self.music_file_info['original_file']}")
+        else:
+            print(f"🔊 set_analyzer: No music_file_info path available")
 
         # CRITICAL: Always use the provided analyzer, don't check for same instance
         # This prevents multiple analyzer instance issues

@@ -18,6 +18,7 @@ import subprocess
 import shutil
 import logging
 import hashlib
+import platform
 from pathlib import Path
 from typing import Dict, Optional, Callable, List, Tuple
 from dataclasses import dataclass
@@ -45,11 +46,12 @@ class SpleeterWorker(QThread):
     separation_complete = Signal(object)  # SeparationResult
     separation_error = Signal(str)  # error message
     
-    def __init__(self, input_file: str, output_dir: str, model: str = "5stems"):
+    def __init__(self, input_file: str, output_dir: str, model: str = "5stems", spleeter_cmd: str = "spleeter"):
         super().__init__()
         self.input_file = input_file
         self.output_dir = output_dir
         self.model = model
+        self.spleeter_cmd = spleeter_cmd
         self.logger = logging.getLogger(__name__)
         self.start_time = None
         
@@ -66,9 +68,9 @@ class SpleeterWorker(QThread):
             # Create output directory
             os.makedirs(self.output_dir, exist_ok=True)
             
-            # Prepare Spleeter command
+            # Prepare Spleeter command (use resolved command passed in)
             cmd = [
-                "spleeter", "separate",
+                self.spleeter_cmd, "separate",
                 "-p", f"spleeter:{self.model}",
                 "-o", self.output_dir,
                 self.input_file
@@ -121,11 +123,25 @@ class SpleeterWorker(QThread):
                 self.separation_complete.emit(result)
                 
             else:
-                error_msg = f"Spleeter failed with return code {process.returncode}"
-                if stderr:
-                    error_msg += f"\nError output: {stderr}"
-                self.logger.error(error_msg)
-                self.separation_error.emit(error_msg)
+                combined_err = (stderr or "") + "\n" + (stdout or "")
+                if "compiled to use AVX" in combined_err:
+                    arch = platform.machine()
+                    guidance = (
+                        f"Spleeter failed with return code {process.returncode}.\n"
+                        "Detected TensorFlow built with AVX (Intel) which is incompatible with this machine ("
+                        f"{arch}).\n\n"
+                        "Fix: Use an Apple Silicon arm64 environment and install: \n"
+                        "  pip install 'tensorflow-macos' 'tensorflow-metal' 'spleeter'\n"
+                        "Then run the app from that environment, or set CUE_SPLEETER_PATH to the spleeter binary."
+                    )
+                    self.logger.error(guidance)
+                    self.separation_error.emit(guidance)
+                else:
+                    error_msg = f"Spleeter failed with return code {process.returncode}"
+                    if combined_err.strip():
+                        error_msg += f"\nError output: {combined_err.strip()}"
+                    self.logger.error(error_msg)
+                    self.separation_error.emit(error_msg)
                 
         except Exception as e:
             error_msg = f"Separation error: {str(e)}"
@@ -189,8 +205,20 @@ class SpleeterService(QObject):
             'save_stems': False,
             'cache_separations': True,
             'max_cache_size_mb': 1000,
-            'temp_cleanup': True
+            'temp_cleanup': True,
+            'spleeter_command': os.environ.get('CUE_SPLEETER_PATH') or 'spleeter'
         }
+        
+    def _resolve_spleeter_cmd(self) -> str:
+        """Resolve the spleeter executable path from config/env or PATH."""
+        try:
+            import shutil as _shutil
+            cmd = self.config.get('spleeter_command') or 'spleeter'
+            # If it's not an absolute path, try to resolve via PATH
+            resolved = _shutil.which(cmd)
+            return resolved or cmd
+        except Exception:
+            return self.config.get('spleeter_command') or 'spleeter'
         
     def check_spleeter_availability(self) -> Tuple[bool, str]:
         """
@@ -200,9 +228,9 @@ class SpleeterService(QObject):
             Tuple of (is_available, status_message)
         """
         try:
-            # Check if spleeter command is available
+            cmd = self._resolve_spleeter_cmd()
             result = subprocess.run(
-                ["spleeter", "--help"], 
+                [cmd, "--help"], 
                 capture_output=True, 
                 text=True,
                 timeout=10
@@ -210,11 +238,26 @@ class SpleeterService(QObject):
             
             if result.returncode == 0:
                 return True, "Spleeter is available and ready"
-            else:
-                return False, f"Spleeter command failed: {result.stderr}"
+            
+            combined = (result.stderr or "") + "\n" + (result.stdout or "")
+            if "compiled to use AVX" in combined:
+                arch = platform.machine()
+                guidance = (
+                    "Spleeter/TensorFlow binary expects AVX (Intel build) but this machine is "
+                    f"{arch}. On Apple Silicon, install tensorflow-macos in an arm64 env and reinstall spleeter. "
+                    "Activate that environment before running the app. "
+                    "Example: create a conda/venv, pip install 'tensorflow-macos' 'tensorflow-metal' 'spleeter'. "
+                    "Optionally set CUE_SPLEETER_PATH to point to the spleeter binary in that env."
+                )
+                return False, guidance
+            
+            return False, f"Spleeter command failed: {combined.strip()}"
                 
         except FileNotFoundError:
-            return False, "Spleeter not found. Please install with: pip install spleeter"
+            return False, (
+                "Spleeter not found on PATH. Install spleeter in your environment and/or set CUE_SPLEETER_PATH "
+                "to the full path of the spleeter executable."
+            )
         except subprocess.TimeoutExpired:
             return False, "Spleeter command timed out"
         except Exception as e:
@@ -248,7 +291,8 @@ class SpleeterService(QObject):
                 self.temp_dirs.append(output_dir)
                 
             # Create and configure worker thread
-            self.worker = SpleeterWorker(input_file, output_dir, self.config['model'])
+            spleeter_cmd = self._resolve_spleeter_cmd()
+            self.worker = SpleeterWorker(input_file, output_dir, self.config['model'], spleeter_cmd=spleeter_cmd)
             
             # Connect signals
             self.worker.progress_update.connect(self._handle_progress_update)

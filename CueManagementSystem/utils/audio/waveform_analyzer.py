@@ -3625,11 +3625,11 @@ class WaveformAnalyzer(QObject):
                         if hasattr(widget, 'music_file_info') and widget.music_file_info:
                             if 'path' in widget.music_file_info:
                                 # Only update if this is a drum stem and the paths don't match
-                                if self.is_drum_stem and widget.music_file_info['path'] != file_path:
+                                if self.is_drum_stem and widget.music_file_info['path'] != str(self.file_path):
                                     logger.info(
-                                        f"Updating music_file_info path from {widget.music_file_info['path']} to {file_path}")
-                                    widget.music_file_info['path'] = file_path
-                                    print(f"🔄 Updated music_file_info path to: {file_path}")
+                                        f"Updating music_file_info path from {widget.music_file_info['path']} to {self.file_path}")
+                                    widget.music_file_info['path'] = str(self.file_path)
+                                    print(f"🔄 Updated music_file_info path to: {self.file_path}")
             except Exception as e:
                 logger.warning(f"Error updating music_file_info path: {str(e)}")
 
