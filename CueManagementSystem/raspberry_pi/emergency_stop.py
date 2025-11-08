@@ -1,114 +1,86 @@
 #!/usr/bin/env python3
 """
-Emergency Stop Script for Raspberry Pi
-
-This script immediately disables all outputs and disarms the system
-in case of emergency.
-
-Usage:
-    python3 emergency_stop.py
+Emergency stop - immediately disable all outputs and disarm
 """
-
 import RPi.GPIO as GPIO
-import time
 import sys
-import logging
+import json
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("/home/pi/gpio_control.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("emergency_stop")
-
-# GPIO Pin Configuration
-# Output Enable pins (5 chains) - HIGH when disabled, LOW when enabled
+# GPIO Pin Definitions (BCM numbering)
 OUTPUT_ENABLE_PINS = [2, 3, 4, 5, 6]
-OUTPUT_ENABLE_ACTIVE_LOW = [True, True, True, True, True]  # LOW = enabled
-
-# Serial Clear pins (5 chains) - LOW when disabled, HIGH when enabled
 SERIAL_CLEAR_PINS = [13, 16, 19, 20, 26]
-SERIAL_CLEAR_ACTIVE_HIGH = [True, True, True, True, True]  # HIGH = enabled
-
-# Arm control pin - Active HIGH (LOW when disarmed, HIGH when armed)
+DATA_PINS = [7, 8, 12, 14, 15]
+SCLK_PINS = [17, 18, 22, 23, 27]
+RCLK_PINS = [9, 10, 11, 24, 25]
 ARM_PIN = 21
-ARM_ACTIVE_HIGH = True  # HIGH = armed
 
+# State file location
+STATE_FILE = "/tmp/gpio_state.json"
 
-def setup_gpio():
-    """Initialize GPIO pins"""
+def save_state():
+    """Save safe state to file"""
     try:
-        # Use BCM pin numbering
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-
-        # Setup Output Enable pins as outputs
-        for pin in OUTPUT_ENABLE_PINS:
-            GPIO.setup(pin, GPIO.OUT)
-
-        # Setup Serial Clear pins as outputs
-        for pin in SERIAL_CLEAR_PINS:
-            GPIO.setup(pin, GPIO.OUT)
-
-        # Setup ARM pin as output
-        GPIO.setup(ARM_PIN, GPIO.OUT)
-
-        logger.info("GPIO pins initialized successfully")
-        return True
+        state = {
+            "outputs_enabled": False,
+            "armed": False,
+            "pin_states": {
+                "output_enable": [True] * 5,  # HIGH = disabled
+                "serial_clear": [False] * 5,  # LOW = disabled
+                "data": [False] * 5,
+                "serial_clock": [False] * 5,
+                "register_clock": [False] * 5,
+                "arm": False
+            }
+        }
+        
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
     except Exception as e:
-        logger.error(f"GPIO setup failed: {e}")
-        return False
-
+        pass  # Don't fail if we can't write state file
 
 def emergency_stop():
-    """
-    Emergency stop - immediately disable all outputs and disarm system
-    """
+    """Immediately set all pins to safe state"""
     try:
-        logger.critical("EMERGENCY STOP ACTIVATED")
-
-        # First disarm the system
-        disarm_state = GPIO.LOW if ARM_ACTIVE_HIGH else GPIO.HIGH
-        GPIO.output(ARM_PIN, disarm_state)
-        logger.info(f"System DISARMED - ARM pin {ARM_PIN} set to {disarm_state}")
-
-        # Disable all outputs by setting OE pins to HIGH (disabled)
-        for i, pin in enumerate(OUTPUT_ENABLE_PINS):
-            GPIO.output(pin, GPIO.HIGH)  # HIGH = disabled for OE pins
-            logger.info(f"OE pin {pin} (chain {i + 1}) set to HIGH (disabled)")
-
-        # Clear all shift registers by setting SRCLR pins to LOW (clearing)
-        for i, pin in enumerate(SERIAL_CLEAR_PINS):
-            GPIO.output(pin, GPIO.LOW)  # LOW = clearing for SRCLR pins
-            logger.info(f"SRCLR pin {pin} (chain {i + 1}) set to LOW (clearing)")
-
-        logger.critical("EMERGENCY STOP COMPLETED - All outputs disabled and system disarmed")
-        return True
+        GPIO.setmode(GPIO.BCM)
+        GPIO.setwarnings(False)
+        
+        # Disable outputs (OE HIGH - active LOW)
+        for pin in OUTPUT_ENABLE_PINS:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.HIGH)
+        
+        # Clear shift registers (SRCLR LOW - active HIGH)
+        for pin in SERIAL_CLEAR_PINS:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+        
+        # Set all data/clock pins LOW
+        for pin in DATA_PINS + SCLK_PINS + RCLK_PINS:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+        
+        # Disarm (ARM LOW)
+        GPIO.setup(ARM_PIN, GPIO.OUT)
+        GPIO.output(ARM_PIN, GPIO.LOW)
+        
+        # Save state
+        save_state()
+        
+        return {
+            "status": "success",
+            "message": "Emergency stop executed - all outputs disabled and disarmed"
+        }
+        
     except Exception as e:
-        logger.error(f"Emergency stop failed: {e}")
-        return False
-
+        return {
+            "status": "error",
+            "message": f"Emergency stop failed: {str(e)}"
+        }
 
 def main():
-    """Main function"""
-    print("EMERGENCY STOP INITIATED")
-
-    if setup_gpio():
-        success = emergency_stop()
-        if success:
-            print("Emergency stop completed successfully")
-            sys.exit(0)
-        else:
-            print("Emergency stop failed")
-            sys.exit(1)
-    else:
-        print("GPIO setup failed")
-        sys.exit(1)
-
+    result = emergency_stop()
+    print(json.dumps(result))
+    sys.exit(0 if result["status"] == "success" else 1)
 
 if __name__ == "__main__":
     main()

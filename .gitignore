@@ -58,3 +58,5 @@ CueManagementSystem/waveform_analyzer.log
 
 # Project specific
 CueManagementSystem/pretrained_models/
+pretrained_models/
+venv_madmom/

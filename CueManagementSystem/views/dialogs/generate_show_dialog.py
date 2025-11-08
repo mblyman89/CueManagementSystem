@@ -62,7 +62,7 @@ class RandomShowConfigDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Random Show Configuration")
-        self.resize(800, 600)  # Set a more compact initial size
+        self.resize(900, 700)  # Increased size for enhanced statistics
 
         # Initialize variables
         self.act_percentages = [33, 33, 34]  # Default percentages for the three acts
@@ -257,34 +257,9 @@ class RandomShowConfigDialog(QDialog):
 
         main_layout.addWidget(self.tab_widget, 2)  # Reduce the middle section's space
 
-        # ===== BOTTOM SECTION =====
-        bottom_section = QGroupBox("Generate Show")
-        bottom_layout = QVBoxLayout()
-
-        # Large green Generate Show button
-        generate_button = QPushButton("GENERATE SHOW")
-        generate_button.setStyleSheet("""
-            QPushButton {
-                background-color: #2ecc71;
-                color: white;
-                font-size: 16px;
-                font-weight: bold;
-                padding: 10px;
-                border-radius: 5px;
-                min-height: 40px;
-            }
-            QPushButton:hover {
-                background-color: #27ae60;
-            }
-            QPushButton:pressed {
-                background-color: #1e8449;
-            }
-        """)
-        generate_button.clicked.connect(self.generate_show)
-        bottom_layout.addWidget(generate_button)
-
-        bottom_section.setLayout(bottom_layout)
-        main_layout.addWidget(bottom_section)
+        # ===== BOTTOM SECTION - REMOVED GREEN BUTTON =====
+        # The green "GENERATE SHOW" button has been removed
+        # Users will use the "Add Cues to Table" button at the bottom instead
 
         # ===== DIALOG BUTTONS =====
         # Create a custom button layout
@@ -329,12 +304,10 @@ class RandomShowConfigDialog(QDialog):
         percent_label.setAlignment(Qt.AlignCenter)
         shot_types_layout.addWidget(percent_label, 0, 1)
 
-        delay_label = QLabel("Delay (seconds)")
-        delay_label.setAlignment(Qt.AlignCenter)
-        shot_types_layout.addWidget(delay_label, 0, 2)
+        # Note: Delay parameters removed - now hardcoded in generator for professional timing
 
         # Shot types with dynamic spinboxes
-        shot_types = ["SINGLE SHOT", "DOUBLE SHOT", "SINGLE RUN", "DOUBLE RUN"]
+        shot_types = ["SINGLE SHOT", "DOUBLE SHOT", "SPECIAL EFFECTS"]
 
         # Store widgets for this act
         self.shot_type_widgets[act_key] = {}
@@ -373,59 +346,12 @@ class RandomShowConfigDialog(QDialog):
             percent_spinbox.valueChanged.connect(make_value_changed_func())
             shot_types_layout.addWidget(percent_spinbox, row, 1, Qt.AlignCenter)
 
-            # Delay spinboxes - only for SINGLE RUN and DOUBLE RUN
-            if shot_type in ["SINGLE RUN", "DOUBLE RUN"]:
-                # Delay spinboxes container
-                delay_widget = QWidget()
-                delay_layout = QHBoxLayout(delay_widget)
-                delay_layout.setContentsMargins(0, 0, 0, 0)
-                delay_layout.setSpacing(10)  # Add more spacing between min and max
-
-                # Min delay label and spinbox
-                min_delay_label = QLabel("Min:")
-                delay_layout.addWidget(min_delay_label)
-
-                min_delay_spinbox = QDoubleSpinBox()
-                min_delay_spinbox.setRange(0, 60)
-                min_delay_spinbox.setValue(0.5)  # Default value
-                min_delay_spinbox.setSingleStep(0.1)
-                min_delay_spinbox.setFixedWidth(70)
-                min_delay_spinbox.setEnabled(False)  # Initially disabled
-                delay_layout.addWidget(min_delay_spinbox)
-
-                # Max delay label and spinbox
-                max_delay_label = QLabel("Max:")
-                delay_layout.addWidget(max_delay_label)
-
-                max_delay_spinbox = QDoubleSpinBox()
-                max_delay_spinbox.setRange(0, 60)
-                max_delay_spinbox.setValue(2.0)  # Default value
-                max_delay_spinbox.setSingleStep(0.1)
-                max_delay_spinbox.setFixedWidth(70)
-                max_delay_spinbox.setEnabled(False)  # Initially disabled
-                delay_layout.addWidget(max_delay_spinbox)
-
-                # Add delay widget to grid
-                shot_types_layout.addWidget(delay_widget, row, 2)
-
-                # Store widgets for later access
-                self.shot_type_widgets[act_key][shot_type] = {
-                    "checkbox": checkbox,
-                    "percent": percent_spinbox,
-                    "min_delay": min_delay_spinbox,
-                    "max_delay": max_delay_spinbox,
-                    "has_delay": True
-                }
-            else:
-                # For SINGLE SHOT and DOUBLE SHOT, no delay spinboxes
-                # Empty cell for better alignment - no N/A label
-
-                # Store widgets for later access
-                self.shot_type_widgets[act_key][shot_type] = {
-                    "checkbox": checkbox,
-                    "percent": percent_spinbox,
-                    "has_delay": False
-                }
+            # Store widgets for later access (no delay parameters)
+            self.shot_type_widgets[act_key][shot_type] = {
+                "checkbox": checkbox,
+                "percent": percent_spinbox,
+                "has_delay": False
+            }
 
         # Add total percentage row
         total_row = len(shot_types) + 1
@@ -456,7 +382,6 @@ class RandomShowConfigDialog(QDialog):
         # Set column stretch to use space more effectively
         shot_types_layout.setColumnStretch(0, 2)  # Checkbox column
         shot_types_layout.setColumnStretch(1, 1)  # Percentage column
-        shot_types_layout.setColumnStretch(2, 3)  # Delay column
 
         shot_types_group.setLayout(shot_types_layout)
         layout.addWidget(shot_types_group)
@@ -514,33 +439,82 @@ class RandomShowConfigDialog(QDialog):
         effect_group.setLayout(effect_layout)
         layout.addWidget(effect_group)
 
-        # Statistics section
-        stats_group = QGroupBox("Statistics")
+        # Enhanced Statistics section with scrollable area
+        stats_group = QGroupBox("Act Statistics & Configuration")
         stats_layout = QVBoxLayout()
+
+        # Create a scrollable area for statistics
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setMinimumHeight(200)
+        scroll_area.setMaximumHeight(400)
+
+        # Create widget to hold statistics content
+        stats_widget = QWidget()
+        stats_content_layout = QVBoxLayout(stats_widget)
 
         # Create a read-only text display for statistics
         stats_text = QLabel()
         stats_text.setWordWrap(True)
         stats_text.setTextFormat(Qt.RichText)
-        stats_text.setStyleSheet("background-color: #000000; color: #ffffff; padding: 10px; border-radius: 5px;")
+        stats_text.setStyleSheet("""
+            background-color: #1a1a1a; 
+            color: #ffffff; 
+            padding: 15px; 
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        """)
 
-        # Set initial placeholder content - more compact format
+        # Set initial placeholder content with enhanced formatting
         stats_html = f"""
-        <h4>Act Statistics</h4>
-        <p style="margin:2px"><b>Total Cues:</b> <span id='total_cues'>0</span> | <b>Duration:</b> <span id='act_duration'>0:00</span></p>
+        <div style="font-family: 'Courier New', monospace; font-size: 11px;">
+        <h3 style="color: #4CAF50; margin-bottom: 10px; border-bottom: 2px solid #4CAF50; padding-bottom: 5px;">
+        📊 {act_name.upper()} ACT OVERVIEW</h3>
 
-        <p style="margin:2px"><b>Shot Types:</b> 
-        SINGLE: <span id='single_shot_count'>0</span>, 
-        DOUBLE: <span id='double_shot_count'>0</span>, 
-        S.RUN: <span id='single_run_count'>0</span>, 
-        D.RUN: <span id='double_run_count'>0</span></p>
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td style="color: #FFD700;"><b>⏱️ Duration:</b></td><td>0:00</td></tr>
+        <tr><td style="color: #FFD700;"><b>🎯 Total Outputs:</b></td><td>0</td></tr>
+        <tr><td style="color: #FFD700;"><b>🎆 Estimated Cues:</b></td><td>0</td></tr>
+        <tr><td style="color: #FFD700;"><b>⚡ Avg Cues/Min:</b></td><td>0</td></tr>
+        </table>
+
+        <h4 style="color: #2196F3; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #2196F3;">
+        🎭 Shot Type Distribution</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td>• SINGLE SHOT:</td><td>0 outputs (0%)</td></tr>
+        <tr><td>• DOUBLE SHOT:</td><td>0 outputs (0%)</td></tr>
+        <tr><td>• SINGLE RUN:</td><td>0 outputs (0%)</td></tr>
+        <tr><td>• DOUBLE RUN:</td><td>0 outputs (0%)</td></tr>
+        </table>
+
+        <h4 style="color: #FF9800; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #FF9800;">
+        ✨ Special Effects</h4>
+        <p style="margin-left: 10px; color: #CCCCCC;">None selected</p>
+
+        <h4 style="color: #9C27B0; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #9C27B0;">
+        ⚙️ Technical Details</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td>• Implementation:</td><td>Single-shot based</td></tr>
+        <tr><td>• Timing Precision:</td><td>0.125s increments</td></tr>
+        <tr><td>• Effect Delays:</td><td>Hardcoded professional</td></tr>
+        </table>
+
+        <p style="margin-top: 15px; padding: 8px; background-color: #263238; border-left: 3px solid #4CAF50; color: #B0BEC5; font-size: 10px;">
+        <b>ℹ️ Note:</b> All shot types are created using single shots with precise timing. 
+        Special effects use professional delay patterns for realistic results.
+        </p>
+        </div>
         """
         stats_text.setText(stats_html)
 
         # Store reference to the stats label
         self.shot_type_widgets[act_key]["stats_label"] = stats_text
 
-        stats_layout.addWidget(stats_text)
+        stats_content_layout.addWidget(stats_text)
+        stats_widget.setLayout(stats_content_layout)
+        scroll_area.setWidget(stats_widget)
+
+        stats_layout.addWidget(scroll_area)
         stats_group.setLayout(stats_layout)
         layout.addWidget(stats_group)
 
@@ -564,13 +538,11 @@ class RandomShowConfigDialog(QDialog):
         if "percent" in widgets:
             widgets["percent"].setEnabled(enabled)
 
-        # Only toggle delay spinboxes if this shot type has them
-        if widgets.get("has_delay", False) and "min_delay" in widgets and "max_delay" in widgets:
-            widgets["min_delay"].setEnabled(enabled)
-            widgets["max_delay"].setEnabled(enabled)
-
         # Update the total percentage for this act
         self.update_shot_type_total(act_key)
+
+        # Update statistics to reflect changes
+        self.update_statistics(act_key)
 
     def update_shot_type_total(self, act_key):
         """Calculate and update the total percentage for shot types in an act"""
@@ -602,10 +574,12 @@ class RandomShowConfigDialog(QDialog):
         self.update_statistics(act_key)
 
     def update_statistics(self, act_key):
-        """Update the statistics display based on current settings"""
-        # Get the act index
+        """Update the enhanced statistics display based on current settings"""
+        # Get the act index and name
         act_keys = ["opening", "buildup", "finale"]
+        act_names = ["Opening", "Buildup", "Finale"]
         act_index = act_keys.index(act_key)
+        act_name = act_names[act_index]
 
         # Calculate total outputs for this act
         total_outputs = self.total_outputs.value()
@@ -618,8 +592,11 @@ class RandomShowConfigDialog(QDialog):
         act_duration_minutes = act_duration_seconds // 60
         act_duration_remaining_seconds = act_duration_seconds % 60
 
-        # Calculate shot type counts
+        # Calculate shot type counts and percentages
         shot_type_counts = {}
+        shot_type_percentages = {}
+        total_checked_percentage = 0
+
         for shot_type, widgets in self.shot_type_widgets[act_key].items():
             # Skip non-shot type entries
             if shot_type in ["total_label", "warning_label", "special_effects", "stats_label"]:
@@ -629,32 +606,164 @@ class RandomShowConfigDialog(QDialog):
             if isinstance(widgets, dict) and "checkbox" in widgets:
                 if widgets["checkbox"].isChecked():
                     percentage = widgets["percent"].value()
+                    total_checked_percentage += percentage
                     count = int((percentage / 100.0) * act_outputs)
                     shot_type_counts[shot_type] = count
+                    shot_type_percentages[shot_type] = percentage
                 else:
                     shot_type_counts[shot_type] = 0
+                    shot_type_percentages[shot_type] = 0
 
-        # Update the statistics HTML - more compact format
-        stats_html = f"""
-        <h4>Act Statistics</h4>
-        <p style="margin:2px"><b>Total Cues:</b> <span id='total_cues'>{act_outputs}</span> | <b>Duration:</b> <span id='act_duration'>{act_duration_minutes}:{act_duration_remaining_seconds:02d}</span></p>
+        # Calculate estimated cues (more accurate with special effects)
+        estimated_cues = 0
+        estimated_cues += shot_type_counts.get("SINGLE SHOT", 0)  # 1 cue per output
+        estimated_cues += shot_type_counts.get("DOUBLE SHOT", 0) // 2  # 1 cue per 2 outputs
 
-        <p style="margin:2px"><b>Shot Types:</b> 
-        SINGLE: <span id='single_shot_count'>{shot_type_counts.get("SINGLE SHOT", 0)}</span>, 
-        DOUBLE: <span id='double_shot_count'>{shot_type_counts.get("DOUBLE SHOT", 0)}</span>, 
-        S.RUN: <span id='single_run_count'>{shot_type_counts.get("SINGLE RUN", 0)}</span>, 
-        D.RUN: <span id='double_run_count'>{shot_type_counts.get("DOUBLE RUN", 0)}</span></p>
-        """
+        # Special effects: estimate based on effect patterns
+        special_effects_outputs = shot_type_counts.get("SPECIAL EFFECTS", 0)
+        if special_effects_outputs > 0:
+            # Average 4 outputs per effect sequence (trot=3, gallop=4, step=4, etc.)
+            estimated_cues += special_effects_outputs // 4
 
-        # Add special effects information if any are selected - compact format
+        # Calculate average cues per minute
+        avg_cues_per_min = (estimated_cues / (act_duration_seconds / 60.0)) if act_duration_seconds > 0 else 0
+
+        # Get selected special effects and their details
         selected_effects = []
+        effect_details = {
+            "Trot": "Steady 3-beat (0.7s)",
+            "Gallop": "Fast triplet (0.15s×3 + 0.5s)",
+            "Step": "Walking rhythm (1.0s, 0.5s)",
+            "Rock Ballad": "Classic rock (0.8s, 0.4s)",
+            "Metal Ballad": "Double bass (0.25s×2 + 0.5s)",
+            "Chase": "LED sequence (0.3s uniform)",
+            "Random": "Variable delays",
+            "False Finale": "Dramatic pause + restart"
+        }
+
         for effect, checkbox in self.shot_type_widgets[act_key]["special_effects"].items():
             if checkbox.isChecked():
                 selected_effects.append(effect)
 
+        # Build effects list with details
         if selected_effects:
-            effects_text = ", ".join(selected_effects)
-            stats_html += f"<p style=&quot;margin:2px&quot;><b>Effects:</b> {effects_text}</p>"
+            effects_html = ""
+            for effect in selected_effects:
+                detail = effect_details.get(effect, "")
+                effects_html += f"<tr><td style='padding-left: 10px;'>• {effect}:</td><td style='color: #B0BEC5;'>{detail}</td></tr>\n"
+        else:
+            effects_html = "<tr><td colspan='2' style='padding-left: 10px; color: #888;'>None selected</td></tr>"
+
+        # Build shot type distribution table
+        shot_type_rows = ""
+        shot_type_display = {
+            "SINGLE SHOT": "Single Shot",
+            "DOUBLE SHOT": "Double Shot",
+            "SPECIAL EFFECTS": "Special Effects"
+        }
+
+        for shot_type in ["SINGLE SHOT", "DOUBLE SHOT", "SPECIAL EFFECTS"]:
+            count = shot_type_counts.get(shot_type, 0)
+            pct = shot_type_percentages.get(shot_type, 0)
+            display_name = shot_type_display.get(shot_type, shot_type)
+
+            if count > 0:
+                shot_type_rows += f"<tr><td>• {display_name}:</td><td>{count} outputs ({pct}%)</td></tr>\n"
+
+        # Calculate intensity metrics
+        intensity_score = 0
+        if act_duration_seconds > 0:
+            # Higher cues/min = higher intensity
+            intensity_score = min(100, int((avg_cues_per_min / 10.0) * 100))
+
+        intensity_label = "Low"
+        intensity_color = "#4CAF50"
+        if intensity_score > 70:
+            intensity_label = "Very High"
+            intensity_color = "#F44336"
+        elif intensity_score > 50:
+            intensity_label = "High"
+            intensity_color = "#FF9800"
+        elif intensity_score > 30:
+            intensity_label = "Moderate"
+            intensity_color = "#FFC107"
+
+        # Calculate pacing
+        if avg_cues_per_min < 3:
+            pacing = "Slow &amp; Dramatic"
+        elif avg_cues_per_min < 6:
+            pacing = "Steady Build"
+        elif avg_cues_per_min < 10:
+            pacing = "Energetic"
+        else:
+            pacing = "Rapid Fire"
+
+        # Estimate show cost (rough estimate: $2 per output)
+        estimated_cost = act_outputs * 2
+
+        # Calculate effect complexity
+        num_effects = len(selected_effects)
+        if num_effects == 0:
+            complexity = "Simple (No effects)"
+        elif num_effects <= 2:
+            complexity = "Moderate (Few effects)"
+        elif num_effects <= 4:
+            complexity = "Complex (Multiple effects)"
+        else:
+            complexity = "Very Complex (Many effects)"
+
+        # Update the statistics HTML with enhanced formatting
+        stats_html = f"""
+        <div style="font-family: 'Courier New', monospace; font-size: 11px;">
+        <h3 style="color: #4CAF50; margin-bottom: 10px; border-bottom: 2px solid #4CAF50; padding-bottom: 5px;">
+        📊 {act_name.upper()} ACT OVERVIEW</h3>
+
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td style="color: #FFD700;"><b>⏱️ Duration:</b></td><td>{act_duration_minutes}:{act_duration_remaining_seconds:02d} ({act_percentage}% of show)</td></tr>
+        <tr><td style="color: #FFD700;"><b>🎯 Total Outputs:</b></td><td>{act_outputs} outputs ({act_percentage}% of {total_outputs})</td></tr>
+        <tr><td style="color: #FFD700;"><b>🎆 Estimated Cues:</b></td><td>~{estimated_cues} cues</td></tr>
+        <tr><td style="color: #FFD700;"><b>⚡ Cues per Minute:</b></td><td>{avg_cues_per_min:.1f} cues/min</td></tr>
+        <tr><td style="color: #FFD700;"><b>💰 Est. Cost:</b></td><td>${estimated_cost:,} (~$2/output)</td></tr>
+        </table>
+
+        <h4 style="color: #2196F3; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #2196F3;">
+        🎭 Shot Type Distribution</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        {shot_type_rows}
+        </table>
+
+        <h4 style="color: #FF9800; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #FF9800;">
+        ✨ Special Effects ({num_effects} selected)</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        {effects_html}
+        </table>
+
+        <h4 style="color: #E91E63; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #E91E63;">
+        📈 Performance Metrics</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td>• Intensity:</td><td><span style="color: {intensity_color}; font-weight: bold;">{intensity_label}</span> ({intensity_score}/100)</td></tr>
+        <tr><td>• Pacing:</td><td>{pacing}</td></tr>
+        <tr><td>• Complexity:</td><td>{complexity}</td></tr>
+        <tr><td>• Avg Time/Cue:</td><td>{f'{(act_duration_seconds / estimated_cues):.2f}s' if estimated_cues > 0 else 'N/A'}</td></tr>
+        </table>
+
+        <h4 style="color: #9C27B0; margin-top: 15px; margin-bottom: 5px; border-bottom: 1px solid #9C27B0;">
+        ⚙️ Technical Details</h4>
+        <table style="width: 100%; margin-bottom: 10px;">
+        <tr><td>• Implementation:</td><td>Single-shot based</td></tr>
+        <tr><td>• Timing Precision:</td><td>0.125s (125ms) increments</td></tr>
+        <tr><td>• Effect Delays:</td><td>Hardcoded professional patterns</td></tr>
+        <tr><td>• Output Order:</td><td>{'Sequential (1→{})'.format(total_outputs) if self.sequential_order else 'Random'}</td></tr>
+        <tr><td>• Act Position:</td><td>{act_index + 1} of 3</td></tr>
+        </table>
+
+        <p style="margin-top: 15px; padding: 8px; background-color: #263238; border-left: 3px solid #4CAF50; color: #B0BEC5; font-size: 10px;">
+        <b>ℹ️ Professional Note:</b> All shot types use single ignitions with precise timing. 
+        Special effects are created through carefully timed sequences. Double shots = 2 singles at same time.
+        Effects use proven professional delay patterns for maximum visual impact.
+        </p>
+        </div>
+        """
 
         # Update the stats label
         stats_label = self.shot_type_widgets[act_key]["stats_label"]
@@ -734,6 +843,8 @@ class RandomShowConfigDialog(QDialog):
             # If Sequential is checked, set sequential_order to True
             # If Random is checked, set sequential_order to False
             self.sequential_order = self.sequential_checkbox.isChecked()
+            # Update statistics to reflect the change
+            self.update_all_statistics()
 
     def set_default_values(self):
         """Set default values for all acts based on requirements"""
@@ -743,23 +854,19 @@ class RandomShowConfigDialog(QDialog):
         self.shot_type_widgets[opening_act]["DOUBLE SHOT"]["checkbox"].setChecked(True)
 
         # Ensure percentages add up to 100%
-        self.shot_type_widgets[opening_act]["SINGLE SHOT"]["percent"].setValue(50)
-        self.shot_type_widgets[opening_act]["DOUBLE SHOT"]["percent"].setValue(50)
+        self.shot_type_widgets[opening_act]["SINGLE SHOT"]["percent"].setValue(60)
+        self.shot_type_widgets[opening_act]["DOUBLE SHOT"]["percent"].setValue(40)
 
-        # Build up act: single shot, double shot, single run types checked
+        # Build up act: single shot, double shot, and special effects checked
         buildup_act = "buildup"
         self.shot_type_widgets[buildup_act]["SINGLE SHOT"]["checkbox"].setChecked(True)
         self.shot_type_widgets[buildup_act]["DOUBLE SHOT"]["checkbox"].setChecked(True)
-        self.shot_type_widgets[buildup_act]["SINGLE RUN"]["checkbox"].setChecked(True)
-
-        # Set single run delay to .5 and 1 seconds
-        self.shot_type_widgets[buildup_act]["SINGLE RUN"]["min_delay"].setValue(0.5)
-        self.shot_type_widgets[buildup_act]["SINGLE RUN"]["max_delay"].setValue(1.0)
+        self.shot_type_widgets[buildup_act]["SPECIAL EFFECTS"]["checkbox"].setChecked(True)
 
         # Ensure percentages add up to 100%
-        self.shot_type_widgets[buildup_act]["SINGLE SHOT"]["percent"].setValue(33)
-        self.shot_type_widgets[buildup_act]["DOUBLE SHOT"]["percent"].setValue(33)
-        self.shot_type_widgets[buildup_act]["SINGLE RUN"]["percent"].setValue(34)
+        self.shot_type_widgets[buildup_act]["SINGLE SHOT"]["percent"].setValue(40)
+        self.shot_type_widgets[buildup_act]["DOUBLE SHOT"]["percent"].setValue(30)
+        self.shot_type_widgets[buildup_act]["SPECIAL EFFECTS"]["percent"].setValue(30)
 
         # Special effects for build up: trot, step, and chase checked
         self.shot_type_widgets[buildup_act]["special_effects"]["Trot"].setChecked(True)
@@ -770,22 +877,12 @@ class RandomShowConfigDialog(QDialog):
         finale_act = "finale"
         self.shot_type_widgets[finale_act]["SINGLE SHOT"]["checkbox"].setChecked(True)
         self.shot_type_widgets[finale_act]["DOUBLE SHOT"]["checkbox"].setChecked(True)
-        self.shot_type_widgets[finale_act]["SINGLE RUN"]["checkbox"].setChecked(True)
-        self.shot_type_widgets[finale_act]["DOUBLE RUN"]["checkbox"].setChecked(True)
-
-        # Set single run delay to .25 and .75 seconds
-        self.shot_type_widgets[finale_act]["SINGLE RUN"]["min_delay"].setValue(0.25)
-        self.shot_type_widgets[finale_act]["SINGLE RUN"]["max_delay"].setValue(0.75)
-
-        # Set double run delay to .37 and .87 seconds
-        self.shot_type_widgets[finale_act]["DOUBLE RUN"]["min_delay"].setValue(0.37)
-        self.shot_type_widgets[finale_act]["DOUBLE RUN"]["max_delay"].setValue(0.87)
+        self.shot_type_widgets[finale_act]["SPECIAL EFFECTS"]["checkbox"].setChecked(True)
 
         # Ensure percentages add up to 100%
-        self.shot_type_widgets[finale_act]["SINGLE SHOT"]["percent"].setValue(25)
-        self.shot_type_widgets[finale_act]["DOUBLE SHOT"]["percent"].setValue(25)
-        self.shot_type_widgets[finale_act]["SINGLE RUN"]["percent"].setValue(25)
-        self.shot_type_widgets[finale_act]["DOUBLE RUN"]["percent"].setValue(25)
+        self.shot_type_widgets[finale_act]["SINGLE SHOT"]["percent"].setValue(30)
+        self.shot_type_widgets[finale_act]["DOUBLE SHOT"]["percent"].setValue(30)
+        self.shot_type_widgets[finale_act]["SPECIAL EFFECTS"]["percent"].setValue(40)
 
         # Special effects for finale: rock ballad, metal ballad, gallop, and false finale
         self.shot_type_widgets[finale_act]["special_effects"]["Rock Ballad"].setChecked(True)
@@ -871,10 +968,8 @@ class RandomShowConfigDialog(QDialog):
                         "percentage": widgets["percent"].value()
                     }
 
-                    # Add delay settings only if this shot type has them
-                    if widgets.get("has_delay", False):
-                        shot_config["min_delay"] = widgets["min_delay"].value()
-                        shot_config["max_delay"] = widgets["max_delay"].value()
+                    # Note: Delay settings are now hardcoded in the generator
+                    # No need to pass them from the dialog
 
                     # Add to act configuration
                     act_config["shot_types"][shot_type] = shot_config

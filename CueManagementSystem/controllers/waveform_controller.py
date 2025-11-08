@@ -48,16 +48,6 @@ class WaveformControlsPanel(QWidget):
     zoom_changed = Signal(float)
     zoom_reset_requested = Signal()
 
-    # Beat Detection Signals
-    analyze_file_requested = Signal()
-    manual_peak_mode_changed = Signal(bool)
-    cleanup_filter_requested = Signal()
-    restore_peaks_requested = Signal()
-
-    # State Management Signals
-    save_state_requested = Signal()
-    load_state_requested = Signal()
-
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
 

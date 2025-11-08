@@ -73,10 +73,11 @@ class WaveformAnalysisDialog(QDialog):
             cue_table: Reference to the CueTableView instance.
         """
         super().__init__(parent)
-        self.setWindowTitle("Optimized Waveform Analysis")
+        self.setWindowTitle("Waveform Analysis")
         # Set window flags to include minimize button and ensure it's functional
         # Also keep dialog on top of main window for consistency with music_analysis_dialog
-        self.setWindowFlags(Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
+        self.setWindowFlags(
+            Qt.Window | Qt.WindowMinimizeButtonHint | Qt.WindowMaximizeButtonHint | Qt.WindowCloseButtonHint | Qt.WindowStaysOnTopHint)
         print(f"🎛️ Initializing OptimizedWaveformAnalysisDialog")
 
         # Store music file information and references
@@ -806,10 +807,17 @@ class WaveformAnalysisDialog(QDialog):
 
             # Add detailed peak information with timestamps
             for i, peak in enumerate(peaks):
-                # Check if this peak is marked as a double shot
+                # DOUBLE SHOT FIX: Check if this peak is marked as a double shot
                 is_double_shot = False
                 if hasattr(self.waveform_view, 'double_shot_peaks'):
-                    is_double_shot = i in self.waveform_view.double_shot_peaks
+                    # Check if this is a manual peak or detected peak
+                    if hasattr(peak, 'is_manual') and peak.is_manual:
+                        # For manual peaks, check using the "m{time}" format
+                        manual_peak_id = f"m{peak.time}"
+                        is_double_shot = manual_peak_id in self.waveform_view.double_shot_peaks
+                    else:
+                        # For detected peaks, check using the time value
+                        is_double_shot = peak.time in self.waveform_view.double_shot_peaks
 
                 peak_info = {
                     'index': i,
@@ -1241,7 +1249,8 @@ class WaveformAnalysisDialog(QDialog):
                 self._update_duration_display()
 
                 # Set up media player
-                print(f"🔊 _on_waveform_loaded: About to set up media player with music_file_info path: {self.music_file_info['path'] if self.music_file_info and 'path' in self.music_file_info else 'No path'}")
+                print(
+                    f"🔊 _on_waveform_loaded: About to set up media player with music_file_info path: {self.music_file_info['path'] if self.music_file_info and 'path' in self.music_file_info else 'No path'}")
                 self._setup_media_player()
 
                 # Force initial peak display
@@ -1356,8 +1365,9 @@ class WaveformAnalysisDialog(QDialog):
         # Double-check that we're using the correct file for playback
         # If this is a separated drum stem, make sure we're using the drum stem file
         if ('is_separated' in self.music_file_info and self.music_file_info['is_separated']) or \
-           ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
-            print(f"🔊 _setup_media_player: This is a separated drum stem, ensuring we use the correct file for playback")
+                ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
+            print(
+                f"🔊 _setup_media_player: This is a separated drum stem, ensuring we use the correct file for playback")
             # Make sure file_path is the path from music_file_info, not the original file
             file_path = Path(self.music_file_info['path'])
             print(f"🔊 _setup_media_player: Using drum stem file path: {file_path}")
@@ -2474,7 +2484,7 @@ class WaveformAnalysisDialog(QDialog):
             # Double-check that we're using the correct file for playback
             # If this is a separated drum stem, make sure we're using the drum stem file
             if ('is_separated' in self.music_file_info and self.music_file_info['is_separated']) or \
-               ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
+                    ('is_drum_stem' in self.music_file_info and self.music_file_info['is_drum_stem']):
                 print(f"🔊 _on_play: This is a separated drum stem, ensuring we use the correct file for playback")
                 # Make sure file_path is the path from music_file_info, not the original file
                 file_path = Path(self.music_file_info['path'])
@@ -2537,17 +2547,29 @@ class WaveformAnalysisDialog(QDialog):
             self.stop_btn.setEnabled(True)
             self.position_update_timer.start()
 
+            # Enable centered playhead mode for smooth scrolling during playback
+            if hasattr(self.waveform_view, 'set_playback_mode'):
+                self.waveform_view.set_playback_mode(True)
+
         elif state == QMediaPlayer.PausedState:
             self.play_btn.setEnabled(True)
             self.pause_btn.setEnabled(True)
             self.stop_btn.setEnabled(True)
             self.position_update_timer.stop()
 
+            # Disable centered playhead mode when paused
+            if hasattr(self.waveform_view, 'set_playback_mode'):
+                self.waveform_view.set_playback_mode(False)
+
         else:  # Stopped
             self.play_btn.setEnabled(True)
             self.pause_btn.setEnabled(False)
             self.stop_btn.setEnabled(False)
             self.position_update_timer.stop()
+
+            # Disable centered playhead mode when stopped
+            if hasattr(self.waveform_view, 'set_playback_mode'):
+                self.waveform_view.set_playback_mode(False)
 
     def _update_position_from_player(self) -> None:
         """Update position from media player in real-time"""

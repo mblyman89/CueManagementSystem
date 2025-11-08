@@ -16,6 +16,7 @@ from enum import Enum
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, Signal, QTimer
+from views.managers.watchdog_timer_manager import WatchdogTimer
 
 
 class ShowState(Enum):
@@ -100,6 +101,15 @@ class ShowExecutionManager(QObject):
         self.progress_timer = QTimer()
         self.progress_timer.timeout.connect(self._emit_progress_update)
         self.progress_timer.setInterval(1000)  # Update every second
+
+        # Watchdog timer (only initialize if system_mode is available)
+        self.watchdog = None
+        if self.system_mode:
+            self.watchdog = WatchdogTimer(self.system_mode, parent=self)
+            self.watchdog.timeout_triggered.connect(self._handle_watchdog_timeout)
+            self.watchdog.connection_lost.connect(self._handle_connection_lost)
+            self.watchdog.connection_restored.connect(self._handle_connection_restored)
+            self.logger.info("Watchdog timer initialized")
 
         self.logger.info("Show Execution Manager initialized")
 
@@ -203,6 +213,11 @@ class ShowExecutionManager(QObject):
             # Start progress reporting
             self.progress_timer.start()
 
+            # Start watchdog monitoring (if available and in hardware mode)
+            if self.watchdog and self.system_mode:
+                self.watchdog.start_monitoring()
+                self.logger.info("Watchdog monitoring started")
+
             # Emit show started signal
             self.show_started.emit(len(self.current_show_cues))
 
@@ -220,6 +235,14 @@ class ShowExecutionManager(QObject):
     async def _execute_show_sequence(self):
         """Execute the show sequence (internal method)"""
         try:
+            import time
+
+            # Record show start time for timing calculations
+            show_start_time = time.perf_counter()
+
+            print(f"\n[ShowExec] Starting show execution with {len(self.current_show_cues)} cues")
+            print(f"[ShowExec] Show start time: {show_start_time}")
+
             while self.current_cue_index < len(self.current_show_cues):
                 # Check for abort
                 if self.abort_event.is_set():
@@ -227,11 +250,50 @@ class ShowExecutionManager(QObject):
                     self.show_aborted.emit("Show aborted by user")
                     break
 
+                # NEW: Check connection health (every cue)
+                if hasattr(self, 'system_mode') and self.system_mode:
+                    if not self.system_mode.check_connection_health():
+                        self.logger.critical("Connection lost during show - triggering auto-abort")
+                        self.system_mode.handle_connection_loss_during_show()
+                        self.show_state = ShowState.ABORTED
+                        self.show_aborted.emit("Show aborted - connection lost")
+                        break
+
                 # Wait if paused
                 await self.pause_event.wait()
 
-                # Execute current cue
+                # Get current cue
                 cue = self.current_show_cues[self.current_cue_index]
+                cue_id = cue.get('cue_id', '?')
+
+                # CRITICAL FIX: Wait until cue's execute_time
+                # Get the cue's execute time in milliseconds (field is 'time', not 'execute_time_ms')
+                cue_execute_time_ms = cue.get('time', 0)
+
+                print(f"[ShowExec] Cue {cue_id}: execute_time_ms = {cue_execute_time_ms}")
+
+                if cue_execute_time_ms > 0:
+                    # Calculate target time in seconds
+                    target_time = cue_execute_time_ms / 1000.0
+
+                    # Calculate how long to wait
+                    current_elapsed = time.perf_counter() - show_start_time
+                    wait_time = target_time - current_elapsed
+
+                    print(
+                        f"[ShowExec] Cue {cue_id}: target={target_time:.3f}s, elapsed={current_elapsed:.3f}s, wait={wait_time:.3f}s")
+
+                    if wait_time > 0:
+                        # Wait until it's time to execute this cue
+                        print(f"[ShowExec] Waiting {wait_time:.3f}s for cue {cue_id}")
+                        await asyncio.sleep(wait_time)
+                        print(f"[ShowExec] Executing cue {cue_id} now")
+                    else:
+                        print(f"[ShowExec] Cue {cue_id} is late by {-wait_time:.3f}s, executing immediately")
+                else:
+                    print(f"[ShowExec] WARNING: Cue {cue_id} has no execute time, executing immediately")
+
+                # Execute current cue
                 result = await self._execute_single_cue(cue)
 
                 # Store result
@@ -249,10 +311,7 @@ class ShowExecutionManager(QObject):
                 # Move to next cue
                 self.current_cue_index += 1
 
-                # Add delay between cues if specified
-                cue_delay = cue.get('delay_after', 0)
-                if cue_delay > 0:
-                    await asyncio.sleep(cue_delay / 1000.0)  # Convert ms to seconds
+            print(f"[ShowExec] Show execution sequence complete")
 
             # Show completed
             if self.show_state == ShowState.RUNNING:
@@ -268,6 +327,11 @@ class ShowExecutionManager(QObject):
         finally:
             # Stop progress reporting
             self.progress_timer.stop()
+
+            # Stop watchdog monitoring
+            if self.watchdog:
+                self.watchdog.stop_monitoring()
+                self.logger.info("Watchdog monitoring stopped")
 
             # Update GPIO controller state
             if self.gpio_controller:
@@ -286,11 +350,32 @@ class ShowExecutionManager(QObject):
         start_time = datetime.now()
 
         try:
+            # Check if in hardware mode - if so, skip local execution
+            # The Pi's execute_show.py is already handling the show
+            if self.system_mode and hasattr(self.system_mode, 'is_hardware_mode'):
+                if self.system_mode.is_hardware_mode():
+                    # In hardware mode with show uploaded to Pi
+                    # Just return success - Pi is handling execution
+                    success = True
+                    message = f"Cue {cue.get('cue_id', 'unknown')} executing on Pi"
+                    await asyncio.sleep(0.01)  # Minimal delay
+
+                    duration = (datetime.now() - start_time).total_seconds() * 1000
+
+                    return CueExecutionResult(
+                        cue_id=cue.get('cue_id', 'unknown'),
+                        success=success,
+                        message=message,
+                        execution_time=start_time,
+                        duration_ms=int(duration)
+                    )
+
+            # For simulation mode or single cue execution
             if self.system_mode and hasattr(self.system_mode, 'send_professional_cue'):
                 # Use professional MQTT if available
                 success, message = await self.system_mode.send_professional_cue(cue)
             elif self.system_mode:
-                # Fall back to regular cue sending
+                # Fall back to regular cue sending (for single cue execution)
                 success, message = await self.system_mode.send_cue(cue)
             else:
                 # Simulation mode
@@ -498,7 +583,7 @@ class ShowExecutionManager(QObject):
             'estimated_remaining_seconds': int(progress.estimated_remaining.total_seconds()),
             'state': progress.state.value,
             'progress_percentage': (
-                        progress.completed_cues / progress.total_cues * 100) if progress.total_cues > 0 else 0
+                    progress.completed_cues / progress.total_cues * 100) if progress.total_cues > 0 else 0
         }
 
         self.progress_updated.emit(progress_dict)
@@ -535,3 +620,73 @@ class ShowExecutionManager(QObject):
                 for result in self.execution_results
             ]
         }
+
+    def _handle_watchdog_timeout(self):
+        """Handle watchdog timeout - connection lost for too long."""
+        self.logger.critical("WATCHDOG TIMEOUT: Connection lost - aborting show")
+
+        # Trigger abort
+        self.abort_event.set()
+
+        # Emit abort signal
+        self.show_aborted.emit("Watchdog timeout - connection lost")
+
+        # Try emergency stop
+        if self.system_mode:
+            try:
+                self.system_mode.emergency_stop()
+            except Exception as e:
+                self.logger.error(f"Emergency stop failed during watchdog timeout: {e}")
+
+    def _handle_connection_lost(self):
+        """Handle connection lost event from watchdog."""
+        self.logger.warning("Watchdog detected connection loss")
+        # Just log for now - watchdog will trigger timeout if it persists
+
+    def _handle_connection_restored(self):
+        """Handle connection restored event from watchdog."""
+        self.logger.info("Watchdog detected connection restored")
+
+    def get_watchdog_status(self) -> Optional[Dict[str, Any]]:
+        """
+        Get watchdog status.
+
+        Returns:
+            Watchdog status dict or None if watchdog not available
+        """
+        if self.watchdog:
+            return self.watchdog.get_status()
+        return None
+
+    def get_watchdog_event_log(self) -> list:
+        """
+        Get watchdog event log.
+
+        Returns:
+            List of watchdog events or empty list if watchdog not available
+        """
+        if self.watchdog:
+            return self.watchdog.get_event_log()
+        return []
+
+    def cleanup(self):
+        """Cleanup resources when shutting down."""
+        try:
+            # Stop any running show
+            if self.is_executing:
+                self.stop_show()
+
+            # Cleanup watchdog
+            if self.watchdog:
+                self.watchdog.cleanup()
+                self.watchdog = None
+        except Exception as e:
+            print(f"Error during show execution manager cleanup: {e}")
+
+    def __del__(self):
+        """Destructor - ensure cleanup happens."""
+        try:
+            if hasattr(self, 'watchdog') and self.watchdog:
+                self.watchdog.stop_monitoring()
+        except:
+            pass

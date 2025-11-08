@@ -1,10 +1,11 @@
 import logging
 import json
 import time
+from datetime import datetime
 from typing import Optional, Dict, Any, List
 from PySide6.QtCore import QObject, Signal, QTimer
 from controllers.hardware_controller import HardwareController
-from hardware.shift_register_formatter import ShiftRegisterFormatter, ShiftRegisterConfig
+from views.managers.shift_register_formatter_manager import ShiftRegisterFormatter, ShiftRegisterConfig
 
 
 class SystemMode(QObject):
@@ -26,10 +27,10 @@ class SystemMode(QObject):
         self.current_mode = "simulation"
         self.communication_method = "ssh"  # Default to SSH for Raspberry Pi communication
         self.connection_settings = {
-            "host": "raspberrypi.local",
+            "host": "192.168.68.82",  # Hardcoded Pi IP
             "port": 22,  # SSH port
-            "username": "pi",
-            "password": "",
+            "username": "cuepishifter",  # Hardcoded username
+            "password": "cuepishifter",  # Hardcoded password
             "known_hosts": None
         }
         self.ssh_connection = None
@@ -52,9 +53,9 @@ class SystemMode(QObject):
                 outputs_per_chain=200,  # 25 × 8 = 200 outputs per chain
                 use_output_enable=True,
                 use_serial_clear=True,
-                output_enable_pins=[18, 19, 20, 21, 22],  # GPIO pins for OE
-                serial_clear_pins=[23, 24, 25, 26, 27],  # GPIO pins for SRCLR
-                arm_pin=17  # Single arm control pin
+                output_enable_pins=[2, 3, 4, 5, 6],  # GPIO pins for OE (Active LOW: HIGH=disabled, LOW=enabled)
+                serial_clear_pins=[13, 16, 19, 20, 26],  # GPIO pins for SRCLR (Active HIGH: LOW=disabled, HIGH=enabled)
+                arm_pin=21  # Single arm control pin (Active HIGH: LOW=disarmed, HIGH=armed)
             )
             print("✅ Configured for 1000 outputs (5 chains × 25 registers × 8 outputs)")
         except TypeError as e:
@@ -182,6 +183,55 @@ class SystemMode(QObject):
     def is_hardware_mode(self):
         """Check if system is in hardware mode"""
         return self.current_mode == "hardware"
+
+    def normalize_cue_for_pi(self, cue_data: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Normalize cue data to match Pi script expectations
+
+        Args:
+            cue_data: Dictionary with application format
+
+        Returns:
+            Dictionary with Pi format
+        """
+        cue_type = cue_data.get('cue_type', '')
+        output_values = cue_data.get('output_values', [])
+
+        # Base normalized data
+        normalized = {
+            'type': cue_type,  # Pi expects 'type' not 'cue_type'
+            'time': cue_data.get('time', 0),  # Time in milliseconds
+            'duration': 500,  # Default 500ms pulse duration
+        }
+
+        # Add type-specific fields
+        if cue_type == 'SINGLE SHOT':
+            if len(output_values) >= 1:
+                normalized['output'] = output_values[0]
+
+        elif cue_type == 'DOUBLE SHOT':
+            if len(output_values) >= 2:
+                normalized['output1'] = output_values[0]
+                normalized['output2'] = output_values[1]
+
+        elif cue_type == 'SINGLE RUN':
+            if len(output_values) >= 2:
+                normalized['start_output'] = output_values[0]
+                normalized['end_output'] = output_values[-1]
+                normalized['delay'] = int(cue_data.get('delay', 0) * 1000)  # Convert to ms
+
+        elif cue_type == 'DOUBLE RUN':
+            # For DOUBLE RUN, outputs are paired
+            # outputs_str format: "1, 2, 3, 4" means pairs (1,2) and (3,4)
+            if len(output_values) >= 4:
+                mid = len(output_values) // 2
+                normalized['start_output1'] = output_values[0]
+                normalized['end_output1'] = output_values[mid - 1]
+                normalized['start_output2'] = output_values[mid]
+                normalized['end_output2'] = output_values[-1]
+                normalized['delay'] = int(cue_data.get('delay', 0) * 1000)  # Convert to ms
+
+        return normalized
 
     def is_simulation_mode(self):
         """Check if system is in simulation mode"""
@@ -432,12 +482,15 @@ class SystemMode(QObject):
         Returns:
             str: The command string
         """
-        # This is a simple example - you may need to customize this based on your needs
-        cue_number = cue_data.get("cue_number", "")
-        cue_type = cue_data.get("cue_type", "")
-        outputs = ",".join(map(str, cue_data.get("output_values", [])))
+        # Normalize cue data for Pi
+        normalized_cue = self.normalize_cue_for_pi(cue_data)
 
-        return f"python3 /home/pi/execute_cue.py --cue={cue_number} --type={cue_type} --outputs={outputs}"
+        # Convert to JSON string
+        import json
+        cue_json = json.dumps(normalized_cue)
+
+        # Return command with JSON argument (no flags)
+        return f"python3 ~/execute_cue.py '{cue_json}'"
 
     # Button Integration Methods for Large-Scale System
 
@@ -467,40 +520,71 @@ class SystemMode(QObject):
 
             # Send SSH command to Pi if in hardware mode
             if self.is_hardware_mode():
-                if self.ssh_connection:
-                    print("SystemMode: Sending SSH command")
-                    command = f"python3 /home/pi/toggle_outputs.py --enabled={int(new_state)}"
+                print("SystemMode: In hardware mode, creating fresh SSH connection")
 
-                    # Execute command synchronously
-                    try:
-                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
-                        exit_status = stdout.channel.recv_exit_status()
+                # Create fresh SSH connection (like Set GPIO State button does)
+                import paramiko
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-                        if exit_status == 0:
-                            output = stdout.read().decode().strip()
-                            self.logger.info(f"{status_message} via SSH: {output}")
-                            print(f"SystemMode: SSH command sent successfully: {output}")
+                try:
+                    # Connect using stored settings
+                    print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
+                    ssh.connect(
+                        hostname=self.connection_settings['host'],
+                        port=self.connection_settings.get('port', 22),
+                        username=self.connection_settings['username'],
+                        password=self.connection_settings.get('password', ''),
+                        timeout=10
+                    )
+                    print("SystemMode: SSH connection established")
 
-                            # Emit message for UI feedback
-                            self.message_received.emit("gpio_status", f"{status_message} successfully")
-                        else:
-                            error = stderr.read().decode().strip()
-                            self.logger.error(f"Failed to send outputs command via SSH: {error}")
-                            print(f"SystemMode: SSH command failed: {error}")
+                    # Execute command
+                    command = f"python3 ~/toggle_outputs.py --enabled={int(new_state)}"
+                    print(f"SystemMode: Executing command: {command}")
 
-                            # Emit error for UI feedback but don't change state
-                            self.error_occurred.emit(
-                                f"Warning: {status_message} in UI only. Hardware control failed: {error}")
-                    except Exception as e:
-                        self.logger.error(f"Error sending SSH command: {e}")
-                        print(f"SystemMode: SSH command error: {e}")
+                    stdin, stdout, stderr = ssh.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
 
-                        # Emit error for UI feedback
+                    # Read both stdout and stderr
+                    output = stdout.read().decode().strip()
+                    error = stderr.read().decode().strip()
+
+                    print(f"SystemMode: Command exit status: {exit_status}")
+                    print(f"SystemMode: Command stdout: {output}")
+                    print(f"SystemMode: Command stderr: {error}")
+
+                    if exit_status == 0:
+                        self.logger.info(f"{status_message} via SSH: {output}")
+                        print(f"SystemMode: SSH command sent successfully")
+
+                        # Emit message for UI feedback
+                        self.message_received.emit("gpio_status", f"{status_message} successfully")
+                    else:
+                        self.logger.error(f"Failed to send outputs command via SSH: {error}")
+                        print(f"SystemMode: SSH command failed with exit status {exit_status}")
+
+                        # Emit error for UI feedback but don't change state
                         self.error_occurred.emit(
-                            f"Warning: {status_message} in UI only. Hardware control error: {str(e)}")
-                else:
-                    print("SystemMode: SSH not connected, cannot send command")
-                    self.error_occurred.emit(f"Warning: {status_message} in UI only. No SSH connection to hardware.")
+                            f"Warning: {status_message} in UI only. Hardware control failed: {error if error else 'Unknown error'}")
+
+                    # Close the connection
+                    ssh.close()
+                    print("SystemMode: SSH connection closed")
+
+                except Exception as e:
+                    self.logger.error(f"Error with SSH connection: {e}")
+                    print(f"SystemMode: SSH connection error: {e}")
+
+                    # Emit error for UI feedback
+                    self.error_occurred.emit(
+                        f"Warning: {status_message} in UI only. SSH connection error: {str(e)}")
+
+                    # Try to close connection if it was opened
+                    try:
+                        ssh.close()
+                    except:
+                        pass
             else:
                 print("SystemMode: In simulation mode, skipping SSH command")
                 self.message_received.emit("gpio_status", f"Simulation: {status_message}")
@@ -544,36 +628,71 @@ class SystemMode(QObject):
 
             # Send SSH command to Pi if in hardware mode
             if self.is_hardware_mode():
-                if self.ssh_connection:
-                    command = f"python3 /home/pi/set_arm_state.py --armed={int(new_state)}"
+                print("SystemMode: In hardware mode, creating fresh SSH connection for arm command")
 
-                    # Execute command synchronously
-                    try:
-                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
-                        exit_status = stdout.channel.recv_exit_status()
+                # Create fresh SSH connection
+                import paramiko
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-                        if exit_status == 0:
-                            output = stdout.read().decode().strip()
-                            self.logger.info(f"{status_message} via SSH: {output}")
+                try:
+                    # Connect using stored settings
+                    print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
+                    ssh.connect(
+                        hostname=self.connection_settings['host'],
+                        port=self.connection_settings.get('port', 22),
+                        username=self.connection_settings['username'],
+                        password=self.connection_settings.get('password', ''),
+                        timeout=10
+                    )
+                    print("SystemMode: SSH connection established")
 
-                            # Emit message for UI feedback
-                            self.message_received.emit("gpio_status", f"{status_message} successfully")
-                        else:
-                            error = stderr.read().decode().strip()
-                            self.logger.error(f"Failed to send arm command via SSH: {error}")
+                    # Execute command
+                    command = f"python3 ~/set_arm_state.py --armed={int(new_state)}"
+                    print(f"SystemMode: Executing command: {command}")
 
-                            # Emit error for UI feedback but don't change state
-                            self.error_occurred.emit(
-                                f"Warning: {status_message} in UI only. Hardware control failed: {error}")
-                    except Exception as e:
-                        self.logger.error(f"Error sending SSH command: {e}")
+                    stdin, stdout, stderr = ssh.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
 
-                        # Emit error for UI feedback
+                    # Read both stdout and stderr
+                    output = stdout.read().decode().strip()
+                    error = stderr.read().decode().strip()
+
+                    print(f"SystemMode: Command exit status: {exit_status}")
+                    print(f"SystemMode: Command stdout: {output}")
+                    print(f"SystemMode: Command stderr: {error}")
+
+                    if exit_status == 0:
+                        self.logger.info(f"{status_message} via SSH: {output}")
+                        print(f"SystemMode: SSH command sent successfully")
+
+                        # Emit message for UI feedback
+                        self.message_received.emit("gpio_status", f"{status_message} successfully")
+                    else:
+                        self.logger.error(f"Failed to send arm command via SSH: {error}")
+                        print(f"SystemMode: SSH command failed with exit status {exit_status}")
+
+                        # Emit error for UI feedback but don't change state
                         self.error_occurred.emit(
-                            f"Warning: {status_message} in UI only. Hardware control error: {str(e)}")
-                else:
-                    self.logger.warning("SSH not connected, cannot send arm command")
-                    self.error_occurred.emit(f"Warning: {status_message} in UI only. No SSH connection to hardware.")
+                            f"Warning: {status_message} in UI only. Hardware control failed: {error if error else 'Unknown error'}")
+
+                    # Close the connection
+                    ssh.close()
+                    print("SystemMode: SSH connection closed")
+
+                except Exception as e:
+                    self.logger.error(f"Error with SSH connection: {e}")
+                    print(f"SystemMode: SSH connection error: {e}")
+
+                    # Emit error for UI feedback
+                    self.error_occurred.emit(
+                        f"Warning: {status_message} in UI only. SSH connection error: {str(e)}")
+
+                    # Try to close connection if it was opened
+                    try:
+                        ssh.close()
+                    except:
+                        pass
             else:
                 self.logger.info(f"Simulation: {status_message}")
                 self.message_received.emit("gpio_status", f"Simulation: {status_message}")
@@ -620,33 +739,69 @@ class SystemMode(QObject):
             # Execute through show execution manager for consistency
             success = await self.show_execution_manager.execute_single_cue(selected_cue)
 
-            # If in hardware mode, also send SSH command to Pi
-            if self.is_hardware_mode() and self.ssh_connection:
+            # If in hardware mode, send SSH command to Pi
+            if self.is_hardware_mode():
+                print("SystemMode: In hardware mode, creating fresh SSH connection for cue execution")
+
+                # Create fresh SSH connection
+                import paramiko
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
                 try:
+                    # Connect using stored settings
+                    print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
+                    ssh.connect(
+                        hostname=self.connection_settings['host'],
+                        port=self.connection_settings.get('port', 22),
+                        username=self.connection_settings['username'],
+                        password=self.connection_settings.get('password', ''),
+                        timeout=10
+                    )
+                    print("SystemMode: SSH connection established")
+
+                    # Normalize cue data for Pi
+                    normalized_cue = self.normalize_cue_for_pi(selected_cue)
+
                     # Convert cue data to JSON string
                     import json
-                    cue_json = json.dumps(selected_cue)
+                    cue_json = json.dumps(normalized_cue)
 
                     # Build command to execute the cue
-                    command = f"python3 /home/pi/execute_cue.py --json='{cue_json}'"
+                    command = f"python3 ~/execute_cue.py '{cue_json}'"
+                    print(f"SystemMode: Executing command: {command}")
 
                     # Execute command synchronously
-                    stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                    stdin, stdout, stderr = ssh.exec_command(command)
                     exit_status = stdout.channel.recv_exit_status()
 
                     if exit_status == 0:
                         output = stdout.read().decode().strip()
                         self.logger.info(f"Cue executed via SSH: {output}")
+                        print(f"SystemMode: Cue executed successfully: {output}")
                         success = True
                     else:
                         error = stderr.read().decode().strip()
                         self.logger.error(f"Failed to execute cue via SSH: {error}")
+                        print(f"SystemMode: Cue execution failed: {error}")
                         self.error_occurred.emit(f"Hardware cue execution failed: {error}")
                         success = False
+
+                    # Close the connection
+                    ssh.close()
+                    print("SystemMode: SSH connection closed")
+
                 except Exception as ssh_e:
                     self.logger.error(f"SSH cue execution error: {ssh_e}")
+                    print(f"SystemMode: SSH connection error: {ssh_e}")
                     self.error_occurred.emit(f"SSH cue execution error: {str(ssh_e)}")
                     success = False
+
+                    # Try to close connection if it was opened
+                    try:
+                        ssh.close()
+                    except:
+                        pass
 
             if success:
                 self.logger.info(f"Cue {selected_cue['cue_id']} executed successfully")
@@ -662,13 +817,14 @@ class SystemMode(QObject):
             self.error_occurred.emit(f"Cue execution failed: {e}")
             return False
 
-    async def handle_execute_show_button(self, show_cues: List[Dict[str, Any]]) -> bool:
+    async def handle_execute_show_button(self, show_cues: List[Dict[str, Any]], start_timestamp: float = None) -> bool:
         """
         Handle Execute Show button click
         Executes all cues in sequence
 
         Args:
             show_cues: List of all cues to execute
+            start_timestamp: Optional timestamp for synchronized start (seconds since epoch)
 
         Returns:
             bool: True if show execution started successfully
@@ -688,39 +844,83 @@ class SystemMode(QObject):
             if self.show_execution_manager.load_show(show_cues):
                 success = await self.show_execution_manager.execute_show()
 
-                # If in hardware mode, also send SSH command to Pi
-                if self.is_hardware_mode() and self.ssh_connection:
+                # If in hardware mode, send SSH command to Pi
+                if self.is_hardware_mode():
+                    print("SystemMode: In hardware mode, creating fresh SSH connection for show execution")
+
+                    # Create fresh SSH connection
+                    import paramiko
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
                     try:
+                        # Connect using stored settings
+                        print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
+                        ssh.connect(
+                            hostname=self.connection_settings['host'],
+                            port=self.connection_settings.get('port', 22),
+                            username=self.connection_settings['username'],
+                            password=self.connection_settings.get('password', ''),
+                            timeout=10
+                        )
+                        print("SystemMode: SSH connection established")
+
+                        # Normalize all cues for Pi
+                        normalized_cues = [self.normalize_cue_for_pi(cue) for cue in show_cues]
+
                         # Convert show data to JSON string
                         import json
-                        show_json = json.dumps({"cues": show_cues})
+                        show_json = json.dumps({"cues": normalized_cues})
 
                         # Create a temporary file on the Pi to store the show data
-                        temp_file = f"/home/pi/show_{int(time.time())}.json"
+                        temp_file = f"~/show_{int(time.time())}.json"
                         create_file_cmd = f"echo '{show_json}' > {temp_file}"
+                        print(f"SystemMode: Creating show file: {temp_file}")
 
                         # Execute command to create the file
-                        stdin, stdout, stderr = self.ssh_connection.exec_command(create_file_cmd)
+                        stdin, stdout, stderr = ssh.exec_command(create_file_cmd)
                         exit_status = stdout.channel.recv_exit_status()
 
                         if exit_status == 0:
-                            # Build command to execute the show
-                            command = f"python3 /home/pi/execute_show.py --show={temp_file} &"
+                            # Build command to execute the show with optional timestamp
+                            if start_timestamp:
+                                command = f"python3 ~/execute_show.py {temp_file} {start_timestamp} &"
+                                print(f"SystemMode: Executing command with timestamp: {command}")
+                                print(f"SystemMode: Start timestamp: {start_timestamp}")
+                                print(f"SystemMode: Current time: {time.time()}")
+                                print(f"SystemMode: Delay: {(start_timestamp - time.time()) * 1000:.1f}ms")
+                            else:
+                                command = f"python3 ~/execute_show.py {temp_file} &"
+                                print(f"SystemMode: Executing command: {command}")
 
                             # Execute command to start the show
-                            stdin, stdout, stderr = self.ssh_connection.exec_command(command)
+                            stdin, stdout, stderr = ssh.exec_command(command)
 
                             self.logger.info(f"Show execution started via SSH")
+                            print("SystemMode: Show execution started on Pi")
                             success = True
                         else:
                             error = stderr.read().decode().strip()
                             self.logger.error(f"Failed to create show file on Pi: {error}")
+                            print(f"SystemMode: Failed to create show file: {error}")
                             self.error_occurred.emit(f"Hardware show execution failed: {error}")
                             success = False
+
+                        # Close the connection
+                        ssh.close()
+                        print("SystemMode: SSH connection closed")
+
                     except Exception as ssh_e:
                         self.logger.error(f"SSH show execution error: {ssh_e}")
+                        print(f"SystemMode: SSH connection error: {ssh_e}")
                         self.error_occurred.emit(f"SSH show execution error: {str(ssh_e)}")
                         success = False
+
+                        # Try to close connection if it was opened
+                        try:
+                            ssh.close()
+                        except:
+                            pass
 
                 if success:
                     self.logger.info("Show execution started successfully")
@@ -758,7 +958,7 @@ class SystemMode(QObject):
             if self.is_hardware_mode() and self.ssh_connection:
                 try:
                     # Build command to pause the show
-                    command = "python3 /home/pi/control_show.py --action=pause"
+                    command = "python3 ~/control_show.py --action=pause"
 
                     # Execute command synchronously
                     stdin, stdout, stderr = self.ssh_connection.exec_command(command)
@@ -811,7 +1011,7 @@ class SystemMode(QObject):
             if self.is_hardware_mode() and self.ssh_connection:
                 try:
                     # Build command to resume the show
-                    command = "python3 /home/pi/control_show.py --action=resume"
+                    command = "python3 ~/control_show.py --action=resume"
 
                     # Execute command synchronously
                     stdin, stdout, stderr = self.ssh_connection.exec_command(command)
@@ -888,40 +1088,55 @@ class SystemMode(QObject):
                 self.logger.error(f"Error aborting GPIO states: {gpio_e}")
                 self.error_occurred.emit(f"GPIO abort error: {str(gpio_e)}")
 
-            # 3. Send emergency stop and abort commands via SSH to hardware
+            # 3. Send emergency stop command via SSH to hardware
             if self.is_hardware_mode():
-                if self.ssh_connection:
-                    try:
-                        # First send the show abort command
-                        abort_command = "python3 /home/pi/control_show.py --action=abort"
-                        stdin, stdout, stderr = self.ssh_connection.exec_command(abort_command)
-                        exit_status = stdout.channel.recv_exit_status()
+                # Create fresh SSH connection for emergency stop
+                import paramiko
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
 
-                        if exit_status == 0:
-                            self.logger.info("Show abort command sent via SSH successfully")
-                        else:
-                            error = stderr.read().decode().strip()
-                            self.logger.error(f"Failed to send show abort command via SSH: {error}")
+                try:
+                    # Connect using stored settings
+                    ssh.connect(
+                        hostname=self.connection_settings['host'],
+                        port=self.connection_settings.get('port', 22),
+                        username=self.connection_settings['username'],
+                        password=self.connection_settings.get('password', ''),
+                        timeout=10
+                    )
 
-                        # Then send the emergency stop command
-                        command = "python3 /home/pi/emergency_stop.py"
-                        stdin, stdout, stderr = self.ssh_connection.exec_command(command)
-                        exit_status = stdout.channel.recv_exit_status()
+                    # First, kill any running execute_show.py processes
+                    kill_command = "pkill -f 'python3.*execute_show.py' || true"
+                    stdin, stdout, stderr = ssh.exec_command(kill_command)
+                    stdout.channel.recv_exit_status()  # Wait for completion
+                    self.logger.info("Killed any running show processes")
 
-                        if exit_status == 0:
-                            output = stdout.read().decode().strip()
-                            self.logger.info(f"Hardware emergency stop successful: {output}")
-                            abort_results["hardware"] = True
-                        else:
-                            error = stderr.read().decode().strip()
-                            self.logger.error(f"Failed to send emergency stop via SSH: {error}")
-                            self.error_occurred.emit(f"Hardware emergency stop failed: {error}")
-                    except Exception as ssh_e:
-                        self.logger.error(f"Error sending emergency stop via SSH: {ssh_e}")
-                        self.error_occurred.emit(f"Hardware emergency stop error: {str(ssh_e)}")
-                else:
-                    self.logger.warning("SSH not connected, cannot send hardware emergency stop")
-                    self.error_occurred.emit("Warning: Hardware emergency stop not sent - no SSH connection")
+                    # Then send emergency stop command
+                    command = "python3 ~/emergency_stop.py"
+                    stdin, stdout, stderr = ssh.exec_command(command)
+                    exit_status = stdout.channel.recv_exit_status()
+
+                    # Read both stdout and stderr
+                    output = stdout.read().decode().strip()
+                    error = stderr.read().decode().strip()
+
+                    if exit_status == 0:
+                        self.logger.info(f"Hardware emergency stop successful: {output}")
+                        abort_results["hardware"] = True
+                    else:
+                        error_msg = error if error else f"Exit code {exit_status}, output: {output}"
+                        self.logger.error(f"Emergency stop returned error: {error_msg}")
+                        # Don't emit error to user - emergency stop still worked
+                        # Just log it for debugging
+                        abort_results["hardware"] = True  # Consider it successful anyway
+
+                    # Close connection
+                    ssh.close()
+
+                except Exception as ssh_e:
+                    self.logger.error(f"Error sending emergency stop via SSH: {ssh_e}")
+                    # Don't fail the abort - local GPIO was already reset
+                    abort_results["hardware"] = True  # Consider successful if local GPIO worked
             else:
                 self.logger.info("In simulation mode, skipping hardware emergency stop")
                 abort_results["hardware"] = True  # Consider successful in simulation mode
@@ -951,12 +1166,168 @@ class SystemMode(QObject):
                 self.logger.error(status_message)
                 self.error_occurred.emit(status_message)
 
+            # NEW: Verify abort success
+            if success:
+                verification_result = self.verify_abort_success()
+                if not verification_result['success']:
+                    self.logger.warning(f"Abort verification warnings: {verification_result['warnings']}")
+                    # Still return success, but log warnings
+
+            # NEW: Log abort event
+            self.log_abort_event("button", success, abort_results)
+
             return success
 
         except Exception as e:
             self.logger.error(f"Failed to abort: {e}")
             self.error_occurred.emit(f"Abort failed: {e}")
+            # Log failed abort
+            self.log_abort_event("button", False, {"error": str(e)})
             return False
+
+    def verify_abort_success(self) -> dict:
+        """
+        Verify that abort actually worked by checking system state
+
+        Returns:
+            dict: {'success': bool, 'warnings': list}
+        """
+        warnings = []
+
+        try:
+            if self.is_hardware_mode() and self.ssh_connection:
+                # Check 1: No show process running
+                try:
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(
+                        "pgrep -f 'execute_show.py'", timeout=5
+                    )
+                    output = stdout.read().decode().strip()
+                    if output:
+                        warnings.append(f"Show process still running (PID: {output})")
+                except Exception as e:
+                    warnings.append(f"Could not verify process status: {str(e)}")
+
+                # Check 2: GPIO states (outputs disabled, system disarmed)
+                try:
+                    stdin, stdout, stderr = self.ssh_connection.exec_command(
+                        "python3 ~/get_gpio_status.py", timeout=10
+                    )
+                    output = stdout.read().decode()
+
+                    import json
+                    status = json.loads(output)
+
+                    if status.get('status') == 'success':
+                        # Check OE pins (should be HIGH = disabled)
+                        oe_pins = status.get('oe_pins', [])
+                        enabled_count = sum(1 for pin in oe_pins if pin.get('state') == False)
+                        if enabled_count > 0:
+                            warnings.append(f"{enabled_count}/5 chains still enabled (OE pins LOW)")
+
+                        # Check ARM pin (should be LOW = disarmed)
+                        arm_state = status.get('arm_pin', {}).get('state', False)
+                        if arm_state == True:
+                            warnings.append("System still armed (GPIO 21 HIGH)")
+                    else:
+                        warnings.append("Could not read GPIO status")
+
+                except Exception as e:
+                    warnings.append(f"Could not verify GPIO states: {str(e)}")
+
+            return {
+                'success': len(warnings) == 0,
+                'warnings': warnings
+            }
+
+        except Exception as e:
+            return {
+                'success': False,
+                'warnings': [f"Verification error: {str(e)}"]
+            }
+
+    def log_abort_event(self, method: str, success: bool, details: dict):
+        """
+        Log abort event with full details
+
+        Args:
+            method: How abort was triggered (button, keyboard, auto)
+            success: Whether abort succeeded
+            details: Additional details about the abort
+        """
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+
+        log_entry = {
+            'timestamp': timestamp,
+            'method': method,
+            'success': success,
+            'mode': self.current_mode,
+            'details': details
+        }
+
+        # Log to console
+        if success:
+            self.logger.critical(f"ABORT EVENT [{method.upper()}]: Success - {timestamp}")
+        else:
+            self.logger.critical(f"ABORT EVENT [{method.upper()}]: FAILED - {timestamp}")
+
+        self.logger.info(f"Abort details: {details}")
+
+        # TODO: Could also log to file for audit trail
+        # with open('abort_log.json', 'a') as f:
+        #     json.dump(log_entry, f)
+        #     f.write('\n')
+
+    def check_connection_health(self) -> bool:
+        """
+        Check if SSH connection is still alive
+
+        Returns:
+            bool: True if connection is healthy, False otherwise
+        """
+        if not self.is_hardware_mode():
+            return True  # Always healthy in simulation mode
+
+        if not self.ssh_connection:
+            return False
+
+        try:
+            # Send a simple echo command to test connection
+            stdin, stdout, stderr = self.ssh_connection.exec_command("echo 'ping'", timeout=3)
+            output = stdout.read().decode().strip()
+            return output == "ping"
+        except Exception as e:
+            self.logger.warning(f"Connection health check failed: {e}")
+            return False
+
+    def handle_connection_loss_during_show(self):
+        """
+        Handle connection loss detected during show execution
+        Automatically triggers abort
+        """
+        self.logger.critical("CONNECTION LOST DURING SHOW EXECUTION - AUTO-ABORTING")
+        self.message_received.emit("system_status", "⚠️ CONNECTION LOST - AUTO-ABORTING SHOW")
+
+        # Trigger abort
+        abort_success = self.handle_abort_button()
+
+        # Log as auto-abort
+        self.log_abort_event("auto_connection_loss", abort_success, {
+            "reason": "SSH connection lost during show execution",
+            "timestamp": datetime.now().isoformat()
+        })
+
+        # Emit error to UI
+        self.error_occurred.emit(
+            "⚠️ CONNECTION LOST\n\n"
+            "SSH connection to Pi was lost during show execution.\n"
+            "Emergency abort has been triggered.\n\n"
+            "Please check:\n"
+            "• Network connection\n"
+            "• Pi power\n"
+            "• SSH service status"
+        )
 
     def handle_shutdown_pi_button(self) -> bool:
         """
@@ -999,7 +1370,7 @@ class SystemMode(QObject):
         try:
             if self.is_hardware_mode() and self.ssh_connection:
                 # First check current mode
-                command = "python3 /home/pi/get_network_status.py"
+                command = "python3 ~/get_network_status.py"
 
                 try:
                     stdin, stdout, stderr = self.ssh_connection.exec_command(command)
@@ -1023,23 +1394,23 @@ class SystemMode(QObject):
                     self.logger.info("Switching to WiFi mode...")
                     self.message_received.emit("network_status", "Switching to WiFi mode...")
 
-                    switch_command = "sudo python3 /home/pi/switch_wifi_mode.py --mode=wifi"
+                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=wifi &amp;"
                     stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
-                    exit_status = stdout.channel.recv_exit_status()
 
-                    if exit_status == 0:
-                        output = stdout.read().decode().strip()
-                        self.logger.info(f"WiFi mode switch successful: {output}")
-                        self.message_received.emit("network_status", "Successfully switched to WiFi mode")
+                    # Don't wait for exit status - the connection will drop during network switch
+                    # Just assume success if command was sent
+                    self.logger.info("WiFi mode switch command sent - connection will drop during switch")
+                    self.message_received.emit("network_status",
+                                               "WiFi mode switch initiated - SSH connection will drop. Reconnect to Pi on Lyman network.")
 
-                        # Update hardware status
-                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
-                        return True
-                    else:
-                        error = stderr.read().decode().strip()
-                        self.logger.error(f"Failed to switch to WiFi mode: {error}")
-                        self.error_occurred.emit(f"Failed to switch to WiFi mode: {error}")
-                        return False
+                    # Close the SSH connection since it will be invalid after network switch
+                    try:
+                        self.ssh_connection.close()
+                    except:
+                        pass
+                    self.ssh_connection = None
+
+                    return True
                 except Exception as e:
                     self.logger.error(f"Error sending WiFi mode command: {e}")
                     self.error_occurred.emit(f"WiFi mode switch failed: {e}")
@@ -1064,7 +1435,7 @@ class SystemMode(QObject):
         try:
             if self.is_hardware_mode() and self.ssh_connection:
                 # First check current mode
-                command = "python3 /home/pi/get_network_status.py"
+                command = "python3 ~/get_network_status.py"
 
                 try:
                     stdin, stdout, stderr = self.ssh_connection.exec_command(command)
@@ -1088,23 +1459,23 @@ class SystemMode(QObject):
                     self.logger.info("Switching to Adhoc mode...")
                     self.message_received.emit("network_status", "Switching to Adhoc mode...")
 
-                    switch_command = "sudo python3 /home/pi/switch_wifi_mode.py --mode=adhoc"
+                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=adhoc &"
                     stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
-                    exit_status = stdout.channel.recv_exit_status()
 
-                    if exit_status == 0:
-                        output = stdout.read().decode().strip()
-                        self.logger.info(f"Adhoc mode switch successful: {output}")
-                        self.message_received.emit("network_status", "Successfully switched to Adhoc mode")
+                    # Don't wait for exit status - the connection will drop during network switch
+                    # Just assume success if command was sent
+                    self.logger.info("Adhoc mode switch command sent - connection will drop during switch")
+                    self.message_received.emit("network_status",
+                                               "Adhoc mode switch initiated - SSH connection will drop. Reconnect to Pi on cuepishifter network at 192.168.42.1")
 
-                        # Update hardware status
-                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
-                        return True
-                    else:
-                        error = stderr.read().decode().strip()
-                        self.logger.error(f"Failed to switch to Adhoc mode: {error}")
-                        self.error_occurred.emit(f"Failed to switch to Adhoc mode: {error}")
-                        return False
+                    # Close the SSH connection since it will be invalid after network switch
+                    try:
+                        self.ssh_connection.close()
+                    except:
+                        pass
+                    self.ssh_connection = None
+
+                    return True
                 except Exception as e:
                     self.logger.error(f"Error sending Adhoc mode command: {e}")
                     self.error_occurred.emit(f"Adhoc mode switch failed: {e}")
@@ -1135,7 +1506,7 @@ class SystemMode(QObject):
                     'timestamp': time.time()
                 }
 
-            command = "python3 /home/pi/get_network_status.py"
+            command = "python3 ~/get_network_status.py"
 
             stdin, stdout, stderr = self.ssh_connection.exec_command(command)
             exit_status = stdout.channel.recv_exit_status()

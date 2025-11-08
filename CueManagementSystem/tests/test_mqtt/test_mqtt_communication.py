@@ -19,7 +19,7 @@ import time
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from hardware.mqtt_client import MQTTClient
-from hardware.shift_register import ShiftRegisterManager
+from hardware.shift_register_old import ShiftRegisterManager
 from controllers.hardware_controller import HardwareController
 
 

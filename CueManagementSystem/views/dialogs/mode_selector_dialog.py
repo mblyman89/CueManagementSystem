@@ -89,6 +89,15 @@ class EnhancedTerminal(QTextEdit):
         # Set up appearance
         self._setup_appearance()
 
+        # NEW: Terminal Session Manager for SSH connections
+        from views.managers.terminal_session_manager import TerminalSessionManager
+        self.session_manager = TerminalSessionManager(self)
+
+        # Connect session manager signals
+        self.session_manager.output_received.connect(self._handle_session_output)
+        self.session_manager.connection_status_changed.connect(self._handle_connection_status)
+        self.session_manager.error_occurred.connect(self._handle_session_error)
+
         # Terminal state
         self.command_history = []
         self.history_index = 0
@@ -117,6 +126,9 @@ class EnhancedTerminal(QTextEdit):
 
         # Initialize terminal with welcome message and prompt
         self.initialize_terminal()
+
+        # Load command history from session manager
+        self.command_history = self.session_manager.get_history()
 
     def _setup_appearance(self):
         """Set up the terminal appearance"""
@@ -178,6 +190,62 @@ class EnhancedTerminal(QTextEdit):
 
         # Set focus policy to ensure it can receive keyboard focus
         self.setFocusPolicy(Qt.StrongFocus)
+
+    # NEW: Session Manager Signal Handlers
+    def _handle_session_output(self, output: str):
+        """Handle output received from session manager"""
+        self.append_text(output)
+        # Auto-scroll to bottom
+        from PySide6.QtGui import QTextCursor
+        self.moveCursor(QTextCursor.End)
+
+    def _handle_connection_status(self, connected: bool, message: str):
+        """Handle connection status changes"""
+        print(f"[DEBUG] EnhancedTerminal._handle_connection_status: connected={connected}, message={message}")
+
+        if connected:
+            self.append_text(f"✅ {message}\n", "#2ecc71")
+            self.pi_mode = True
+            self.prompt = self.pi_prompt
+        else:
+            if self.pi_mode:  # Only show disconnect message if we were connected
+                self.append_text(f"❌ {message}\n", "#e74c3c")
+            self.pi_mode = False
+            self.prompt = "(base) michaellyman@Michaels-MacBook-Pro ~ % "
+
+        # NEW: Update connection status widget - find the ModeSelector dialog
+        parent = self.parent()
+        mode_selector = None
+
+        # Walk up the parent chain to find ModeSelector dialog
+        while parent:
+            if parent.__class__.__name__ == 'ModeSelector':
+                mode_selector = parent
+                break
+            parent = parent.parent()
+
+        print(f"[DEBUG] Found ModeSelector: {mode_selector is not None}")
+
+        if mode_selector and hasattr(mode_selector, 'connection_status_bar'):
+            print(f"[DEBUG] Updating connection_status_bar: connected={connected}")
+            if connected:
+                # Extract host and username from session manager
+                host = self.session_manager.host
+                username = self.session_manager.username
+                print(f"[DEBUG] Setting connected: {username}@{host}")
+                mode_selector.connection_status_bar.set_connected(True, host, username)
+            else:
+                print(f"[DEBUG] Setting disconnected")
+                mode_selector.connection_status_bar.set_connected(False)
+        else:
+            print(f"[DEBUG] connection_status_bar not found")
+
+        self.show_prompt()
+
+    def _handle_session_error(self, error: str):
+        """Handle errors from session manager"""
+        self.append_text(f"❌ Error: {error}\n", "#e74c3c")
+        self.show_prompt()
 
     def initialize_terminal(self):
         """Initialize the terminal with welcome message and prompt"""
@@ -253,6 +321,9 @@ To connect to your Pi, type:
         Restore the terminal state after tab switching or dialog reopening.
         This ensures the cursor is in the right place and the terminal is ready for input.
         """
+        # NEW: Restore command history from session manager
+        self.command_history = self.session_manager.get_history()
+
         # Set focus to the terminal
         self.setFocus()
 
@@ -472,9 +543,12 @@ Use Ctrl+S to save, Ctrl+X to save and exit.
     def process_command(self, command):
         """Process and emit the command"""
         if command.strip():
-            # Add to history
+            # Add to history (both local and session manager)
             self.command_history.append(command)
             self.history_index = len(self.command_history)
+
+            # NEW: Save to session manager for persistence
+            self.session_manager.add_to_history(command)
 
             # Handle special commands
             if command.strip() == "clear":
@@ -711,15 +785,24 @@ class ModeSelector(QDialog):
         # Store parent reference
         self.main_window = parent
 
-        # Initialize default settings
+        # Get system_mode from parent if available
+        if parent and hasattr(parent, 'system_mode'):
+            self.system_mode = parent.system_mode
+        else:
+            self.system_mode = None
+
+        # Initialize default settings with HARDCODED credentials
         self.current_mode = current_mode
         self.communication_method = communication_method
         self.connection_settings = connection_settings or {
-            "host": "cuepishifter.local",
+            "host": "192.168.68.82",  # Hardcoded IP
             "port": 22,
-            "username": "cuepishifter",
-            "password": ""
+            "username": "cuepishifter",  # Hardcoded username
+            "password": "cuepishifter"  # Hardcoded password
         }
+
+        # Store last known WiFi IP for easy switching
+        self.last_wifi_ip = self.connection_settings.get("host", "192.168.68.82")
 
         # Connection status tracking - initialize as connected if in hardware mode
         self.ssh_connected = (current_mode == "hardware")
@@ -734,6 +817,8 @@ class ModeSelector(QDialog):
         # If we're in hardware mode, attempt to connect automatically
         if current_mode == "hardware":
             self.test_ssh_connection_simple(self.connection_settings)
+            # Detect and set the appropriate IP based on current connection
+            self.detect_and_set_initial_ip()
 
     # NEW: Override showEvent to emit shown signal
     def showEvent(self, event):
@@ -745,6 +830,17 @@ class ModeSelector(QDialog):
         # If terminal exists, restore its state
         if hasattr(self, 'terminal_widget'):
             QTimer.singleShot(100, self.terminal_widget.restore_terminal_state)
+
+    # NEW: Override closeEvent to save state and cleanup
+    def closeEvent(self, event):
+        """Handle dialog close event"""
+        # Save terminal state before closing
+        if hasattr(self, 'terminal_widget'):
+            # Command history is automatically saved by session manager
+            # Connection is kept alive for next time (connection pooling)
+            pass
+
+        super().closeEvent(event)
 
     def setup_ui(self):
         """Set up the dialog UI components"""
@@ -793,11 +889,9 @@ class ModeSelector(QDialog):
         self.gpio_status_tab = self.create_gpio_status_tab()
         self.tab_widget.addTab(self.gpio_status_tab, "GPIO Status")
 
-        # Standard dialog buttons
-        button_box = QDialogButtonBox(QDialogButtonBox.Apply | QDialogButtonBox.Close)
-        button_box.button(QDialogButtonBox.Apply).setText("Apply Settings")
+        # Standard dialog buttons (only Close now, Apply moved to Connection Settings)
+        button_box = QDialogButtonBox(QDialogButtonBox.Close)
         button_box.button(QDialogButtonBox.Close).setText("Close Dialog")
-        button_box.button(QDialogButtonBox.Apply).clicked.connect(self.accept_changes)
         button_box.button(QDialogButtonBox.Close).clicked.connect(self.reject)
 
         # Pi control buttons - moved from basic tab to main dialog
@@ -863,13 +957,60 @@ class ModeSelector(QDialog):
         """)
         self.adhoc_button.clicked.connect(self.set_adhoc_mode)
 
+        # Set GPIO State button
+        self.set_gpio_button = QPushButton("Set GPIO State")
+        self.set_gpio_button.setStyleSheet("""
+            QPushButton {
+                background-color: #9b59b6;
+                color: white;
+                font-weight: bold;
+                padding: 8px 16px;
+                border: none;
+                border-radius: 4px;
+            }
+            QPushButton:hover {
+                background-color: #8e44ad;
+            }
+            QPushButton:disabled {
+                background-color: #7f8c8d;
+            }
+        """)
+        self.set_gpio_button.clicked.connect(self.set_gpio_initial_state)
+
         pi_controls_layout.addWidget(self.shutdown_button)
         pi_controls_layout.addWidget(self.wifi_button)
         pi_controls_layout.addWidget(self.adhoc_button)
+        pi_controls_layout.addWidget(self.set_gpio_button)
         pi_controls_layout.addStretch()
+
+        # NEW: Connection Status Widget
+        from views.managers.connection_status_widget import ConnectionStatusBar
+        self.connection_status_bar = ConnectionStatusBar(self)
+
+        # Initialize with saved connection info if available
+        if self.connection_settings and self.connection_settings.get("host"):
+            # Set the host/username so reconnect button can work
+            self.connection_status_bar.host = self.connection_settings.get("host", "")
+            self.connection_status_bar.username = self.connection_settings.get("username", "")
+            # If we're in hardware mode, show as connected
+            if self.current_mode == "hardware":
+                self.connection_status_bar.set_connected(
+                    True,
+                    self.connection_settings.get("host", ""),
+                    self.connection_settings.get("username", "")
+                )
+            else:
+                # Show as disconnected but with reconnect available
+                self.connection_status_bar.set_connected(False)
+
+        # Connect signals
+        self.connection_status_bar.reconnect_requested.connect(self.handle_reconnect)
+        self.connection_status_bar.disconnect_requested.connect(self.handle_disconnect)
+        self.connection_status_bar.test_connection_requested.connect(self.handle_test_connection)
 
         # Add all components to main layout
         main_layout.addWidget(mode_group)
+        main_layout.addWidget(self.connection_status_bar)  # NEW: Add status bar
         main_layout.addWidget(self.tab_widget)
         main_layout.addWidget(pi_controls_group)
         main_layout.addWidget(button_box)
@@ -913,33 +1054,14 @@ class ModeSelector(QDialog):
         tab = QWidget()
         main_layout = QVBoxLayout(tab)
 
-        # Connection status indicators (compact)
-        requirements_group = QGroupBox("Connection Status")
-        requirements_layout = QVBoxLayout(requirements_group)
-
-        # Connection status indicators
-        status_layout = QHBoxLayout()
-        status_layout.addStretch()
-
-        self.ssh_status_label = QLabel("SSH: ❌ Not Connected")
-
-        self.ssh_status_label.setStyleSheet(
-            "padding: 8px; border: 2px solid #a93226; border-radius: 5px; background-color: #a93226; color: white; font-weight: bold;")
-        status_layout.addWidget(self.ssh_status_label)
-
-        # Add some spacing between indicators
-        status_layout.addSpacing(10)
-
-        # Network mode status
+        # Network mode status label (will be added to connection status widget)
         self.network_mode_label = QLabel("Mode: WiFi")
         self.network_mode_label.setStyleSheet(
-            "padding: 8px; border: 2px solid #2980b9; border-radius: 5px; background-color: #2980b9; color: white; font-weight: bold;")
-        status_layout.addWidget(self.network_mode_label)
+            "padding: 4px 8px; border: 1px solid #2980b9; border-radius: 3px; background-color: #2980b9; color: white; font-weight: bold; font-size: 10pt;")
 
-        status_layout.addStretch()
-
-        requirements_layout.addLayout(status_layout)
-        main_layout.addWidget(requirements_group)
+        # SSH status label (kept for backward compatibility but hidden)
+        self.ssh_status_label = QLabel("SSH: ❌ Not Connected")
+        self.ssh_status_label.setVisible(False)
 
         # Connection settings - centered
         connection_group = QGroupBox("Connection Settings")
@@ -974,17 +1096,31 @@ class ModeSelector(QDialog):
 
         connection_layout.addLayout(center_layout)
 
-        # Test connection buttons - centered
-        test_layout = QHBoxLayout()
-        test_layout.addStretch()
+        # Apply Settings button - centered (moved from bottom)
+        apply_layout = QHBoxLayout()
+        apply_layout.addStretch()
 
-        self.test_ssh_button = QPushButton("Test SSH Connection")
-        self.test_ssh_button.clicked.connect(self.test_ssh_connection)
+        self.apply_settings_button = QPushButton("Apply Settings")
+        self.apply_settings_button.setStyleSheet("""
+            QPushButton {
+                background-color: #27ae60;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 8px 16px;
+                font-weight: bold;
+                font-size: 11pt;
+            }
+            QPushButton:hover {
+                background-color: #229954;
+            }
+        """)
+        self.apply_settings_button.clicked.connect(self.accept_changes)
 
-        test_layout.addWidget(self.test_ssh_button)
-        test_layout.addStretch()
+        apply_layout.addWidget(self.apply_settings_button)
+        apply_layout.addStretch()
 
-        connection_layout.addLayout(test_layout)
+        connection_layout.addLayout(apply_layout)
         main_layout.addWidget(connection_group)
 
         # Terminal window - full width
@@ -1287,20 +1423,119 @@ class ModeSelector(QDialog):
         Args:
             mode (str): Current network mode ('wifi' or 'adhoc')
         """
+        # Update the connection status widget's mode label
+        if hasattr(self, 'connection_status_bar'):
+            if mode == "wifi":
+                self.connection_status_bar.set_network_mode("WiFi")
+                # Update style for WiFi
+                self.connection_status_bar.mode_label.setStyleSheet("""
+                    QLabel {
+                        padding: 4px 8px;
+                        border: 1px solid #2980b9;
+                        border-radius: 3px;
+                        background-color: #2980b9;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 10pt;
+                    }
+                """)
+            elif mode == "adhoc":
+                self.connection_status_bar.set_network_mode("AdHoc")
+                # Update style for AdHoc
+                self.connection_status_bar.mode_label.setStyleSheet("""
+                    QLabel {
+                        padding: 4px 8px;
+                        border: 1px solid #27ae60;
+                        border-radius: 3px;
+                        background-color: #27ae60;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 10pt;
+                    }
+                """)
+            else:
+                self.connection_status_bar.set_network_mode("Unknown")
+                # Update style for Unknown
+                self.connection_status_bar.mode_label.setStyleSheet("""
+                    QLabel {
+                        padding: 4px 8px;
+                        border: 1px solid #7f8c8d;
+                        border-radius: 3px;
+                        background-color: #7f8c8d;
+                        color: white;
+                        font-weight: bold;
+                        font-size: 10pt;
+                    }
+                """)
+
+        # Keep the old label updated for backward compatibility (but it's hidden)
         if mode == "wifi":
             self.network_mode_label.setText("Mode: WiFi")
-            self.network_mode_label.setStyleSheet(
-                "padding: 8px; border: 2px solid #2980b9; border-radius: 5px; background-color: #2980b9; color: white; font-weight: bold;")
         elif mode == "adhoc":
             self.network_mode_label.setText("Mode: Adhoc")
-            self.network_mode_label.setStyleSheet(
-                "padding: 8px; border: 2px solid #27ae60; border-radius: 5px; background-color: #27ae60; color: white; font-weight: bold;")
         else:
             self.network_mode_label.setText("Mode: Unknown")
-            self.network_mode_label.setStyleSheet(
-                "padding: 8px; border: 2px solid #7f8c8d; border-radius: 5px; background-color: #7f8c8d; color: white; font-weight: bold;")
-            if hasattr(self, 'terminal_widget'):
-                self.terminal_widget.switch_to_pi_mode()
+
+        if hasattr(self, 'terminal_widget'):
+            self.terminal_widget.switch_to_pi_mode()
+
+    def detect_and_set_initial_ip(self):
+        """Detect the current network mode and set the appropriate IP address"""
+        if not hasattr(self, 'host_input'):
+            return
+
+        current_ip = self.host_input.text()
+
+        # Check if the current IP is the ad-hoc IP
+        if current_ip == "192.168.42.1":
+            # Already set to ad-hoc IP, update the mode status
+            self.update_network_mode_status("adhoc")
+            self.append_to_terminal("📍 Detected Ad-hoc mode (192.168.42.1)", "#3498db")
+        elif current_ip.startswith("192.168."):
+            # Likely WiFi mode (any 192.168.x.x that's not ad-hoc)
+            self.update_network_mode_status("wifi")
+            self.append_to_terminal(f"📍 Detected WiFi mode ({current_ip})", "#3498db")
+        else:
+            # Unknown, keep as is
+            self.append_to_terminal(f"📍 Current IP: {current_ip}", "#3498db")
+
+    def update_ip_for_mode(self, mode):
+        """Update the IP address field based on the network mode
+
+        Args:
+            mode (str): Current network mode ('wifi' or 'adhoc')
+        """
+        if not hasattr(self, 'host_input'):
+            return
+
+        if mode == "adhoc":
+            # Ad-hoc mode always uses 192.168.42.1
+            # Store the current WiFi IP before switching (if it's not ad-hoc IP)
+            current_ip = self.host_input.text()
+            if current_ip != "192.168.42.1" and current_ip.startswith("192.168."):
+                # Save the WiFi IP for later
+                self.last_wifi_ip = current_ip
+
+            self.host_input.setText("192.168.42.1")
+            self.append_to_terminal("📍 IP address updated to: 192.168.42.1 (Ad-hoc mode)", "#3498db")
+        elif mode == "wifi":
+            # WiFi mode - restore last known WiFi IP or use default
+            current_ip = self.host_input.text()
+
+            # Only update if it's currently the ad-hoc IP
+            if current_ip == "192.168.42.1":
+                # Try to restore last known WiFi IP
+                if hasattr(self, 'last_wifi_ip') and self.last_wifi_ip:
+                    self.host_input.setText(self.last_wifi_ip)
+                    self.append_to_terminal(f"📍 IP address restored to: {self.last_wifi_ip} (WiFi mode)", "#3498db")
+                else:
+                    # Use default WiFi IP from connection settings
+                    default_ip = self.connection_settings.get("host", "192.168.68.82")
+                    self.host_input.setText(default_ip)
+                    self.append_to_terminal(f"📍 IP address set to: {default_ip} (WiFi mode)", "#3498db")
+            else:
+                # Keep the current IP if it's not the ad-hoc one
+                self.append_to_terminal(f"📍 Current IP: {current_ip} - verify this is correct for WiFi mode", "#3498db")
 
     def test_ssh_connection(self):
         """Test SSH connection to Raspberry Pi"""
@@ -1308,9 +1543,10 @@ class ModeSelector(QDialog):
 
     def test_ssh_connection_simple(self, connection_settings):
         """Simple SSH connection test using basic socket connectivity"""
-        # Disable the test button during testing
-        self.test_ssh_button.setEnabled(False)
-        self.test_ssh_button.setText("Testing SSH...")
+        # Disable the apply button during testing
+        if hasattr(self, 'apply_settings_button'):
+            self.apply_settings_button.setEnabled(False)
+            self.apply_settings_button.setText("Testing SSH...")
 
         try:
             import socket
@@ -1391,10 +1627,34 @@ class ModeSelector(QDialog):
 
     def handle_ssh_test_result(self, success, message):
         """Handle SSH connection test result"""
-        self.test_ssh_button.setEnabled(True)
-        self.test_ssh_button.setText("Test SSH Connection")
+        # Re-enable the apply button after testing
+        if hasattr(self, 'apply_settings_button'):
+            self.apply_settings_button.setEnabled(True)
+            self.apply_settings_button.setText("Apply Settings")
 
         self.update_connection_status(success)
+
+        # NEW: Update connection status widget
+        if hasattr(self, 'connection_status_bar'):
+            if success:
+                self.connection_status_bar.set_connected(
+                    True,
+                    self.host_input.text(),
+                    self.username_input.text()
+                )
+                # Also update terminal session manager
+                if hasattr(self, 'terminal_widget'):
+                    self.terminal_widget.session_manager.set_connection_settings(
+                        self.host_input.text(),
+                        self.port_input.value(),
+                        self.username_input.text(),
+                        self.password_input.text()
+                    )
+                    # Mark as connected in session manager
+                    self.terminal_widget.pi_mode = True
+                    self.terminal_widget.prompt = self.terminal_widget.pi_prompt
+            else:
+                self.connection_status_bar.set_connected(False)
 
         if success:
             self.append_to_terminal(f"✅ SSH: {message}", "#4e9a06")  # Green color
@@ -1406,6 +1666,168 @@ class ModeSelector(QDialog):
         if hasattr(self, 'terminal_widget'):
             # Use the enhanced terminal's append_text method
             self.terminal_widget.append_text(text + "\n", color)
+
+    # NEW: Connection Status Widget Handlers
+    def handle_reconnect(self):
+        """Handle reconnect request from status widget"""
+        print("[DEBUG] Reconnect requested from status widget")
+
+        # Update status to connecting
+        self.connection_status_bar.set_connecting(
+            self.host_input.text(),
+            self.username_input.text()
+        )
+
+        # Attempt to reconnect via terminal session manager
+        if hasattr(self, 'terminal_widget') and hasattr(self.terminal_widget, 'session_manager'):
+            password = self.password_input.text()
+            port = self.port_input.value()
+            host = self.host_input.text()
+            username = self.username_input.text()
+
+            self.terminal_widget.session_manager.set_connection_settings(
+                host, port, username, password
+            )
+
+            success, message = self.terminal_widget.session_manager.connect()
+
+            if success:
+                self.connection_status_bar.set_connected(True, host, username)
+                self.terminal_widget.append_text(f"✅ {message}\n", "#2ecc71")
+            else:
+                self.connection_status_bar.set_connected(False, host, username)
+                self.terminal_widget.append_text(f"❌ Reconnection failed: {message}\n", "#e74c3c")
+
+            self.terminal_widget.show_prompt()
+
+    def handle_disconnect(self):
+        """Handle disconnect request from status widget"""
+        print("[DEBUG] Disconnect requested from status widget")
+
+        # Disconnect via terminal session manager
+        if hasattr(self, 'terminal_widget') and hasattr(self.terminal_widget, 'session_manager'):
+            self.terminal_widget.session_manager.disconnect()
+
+            # Update status
+            self.connection_status_bar.set_connected(False)
+
+            # Show message in terminal
+            self.terminal_widget.append_text("ℹ️ Disconnected from Pi\n", "#f39c12")
+            self.terminal_widget.show_prompt()
+
+    def handle_test_connection(self):
+        """Handle test connection request from status widget"""
+        print("[DEBUG] Test connection requested from status widget")
+
+        # Test connection by executing a simple command
+        if hasattr(self, 'terminal_widget'):
+            self.terminal_widget.append_text("🔍 Testing connection...\n", "#3498db")
+
+            # Execute a simple command to test
+            self.terminal_widget.process_command("echo 'Connection test successful'")
+
+    # NEW: Connection Status Widget Handlers
+    def handle_reconnect(self):
+        """Handle reconnect request from status widget"""
+        print("[DEBUG] Reconnect requested from status widget")
+
+        # Get connection settings
+        host = self.host_input.text()
+        port = self.port_input.value()
+        username = self.username_input.text()
+        password = self.password_input.text()
+
+        print(f"[DEBUG] Reconnect settings: {username}@{host}:{port}")
+
+        # Update status to connecting
+        self.connection_status_bar.set_connecting(host, username)
+
+        # Attempt to reconnect via terminal
+        if hasattr(self, 'terminal_widget'):
+            # Set connection settings
+            self.terminal_widget.session_manager.set_connection_settings(
+                host, port, username, password
+            )
+
+            # Show connecting message
+            self.terminal_widget.append_text(f"🔄 Reconnecting to {host}...\n", "#3498db")
+
+            # Try to connect
+            success, message = self.terminal_widget.session_manager.connect()
+
+            print(f"[DEBUG] Reconnect result: success={success}, message={message}")
+
+            if success:
+                self.connection_status_bar.set_connected(True, host, username)
+                self.terminal_widget.append_text(f"✅ {message}\n", "#2ecc71")
+                self.terminal_widget.pi_mode = True
+                self.terminal_widget.prompt = self.terminal_widget.pi_prompt
+
+                # Switch to hardware mode
+                self.hardware_radio.setChecked(True)
+                self.ssh_connected = True
+
+                # Notify main window to switch to hardware mode
+                if hasattr(self, 'main_window') and self.main_window:
+                    connection_settings = {
+                        "host": host,
+                        "port": port,
+                        "username": username,
+                        "password": password
+                    }
+                    self.main_window.queue_mode_change("hardware", connection_settings, "ssh")
+            else:
+                self.connection_status_bar.set_connected(False)
+                self.terminal_widget.append_text(f"❌ Reconnection failed: {message}\n", "#e74c3c")
+                self.terminal_widget.pi_mode = False
+                self.terminal_widget.prompt = "(base) michaellyman@Michaels-MacBook-Pro ~ % "
+
+            self.terminal_widget.show_prompt()
+
+    def handle_disconnect(self):
+        """Handle disconnect request from status widget"""
+        print("[DEBUG] Disconnect requested from status widget")
+
+        if hasattr(self, 'terminal_widget'):
+            # Disconnect
+            self.terminal_widget.session_manager.disconnect()
+
+            # Update status
+            self.connection_status_bar.set_connected(False)
+
+            # Update terminal
+            self.terminal_widget.append_text("ℹ️ Disconnected from Pi\n", "#f39c12")
+            self.terminal_widget.pi_mode = False
+            self.terminal_widget.prompt = "(base) michaellyman@Michaels-MacBook-Pro ~ % "
+            self.terminal_widget.show_prompt()
+
+            # Switch back to simulation mode
+            self.simulation_radio.setChecked(True)
+
+            # Update SSH connection flag
+            self.ssh_connected = False
+
+            # If we have a reference to main_window, notify it to reset buttons
+            if hasattr(self, 'main_window') and self.main_window:
+                # Queue mode change to simulation (this is the correct method)
+                self.main_window.queue_mode_change("simulation", {}, "ssh")
+
+                # Reset button states
+                if hasattr(self.main_window, 'update_enable_outputs_button_ui'):
+                    self.main_window.update_enable_outputs_button_ui(False)
+                if hasattr(self.main_window, 'update_arm_outputs_button_ui'):
+                    self.main_window.update_arm_outputs_button_ui(False)
+
+    def handle_test_connection(self):
+        """Handle test connection request from status widget"""
+        print("[DEBUG] Test connection requested from status widget")
+
+        if hasattr(self, 'terminal_widget'):
+            # Show testing message
+            self.terminal_widget.append_text("🔍 Testing connection...\n", "#3498db")
+
+            # Test with a simple command via terminal
+            self.terminal_widget.process_command("echo 'Connection test successful'")
 
     def shutdown_pi(self):
         """Safely shutdown the Raspberry Pi"""
@@ -1427,7 +1849,12 @@ class ModeSelector(QDialog):
 
     def set_wifi_mode(self):
         """Set Pi to WiFi mode"""
-        if not hasattr(self, "system_mode") or not self.ssh_connected:
+        # Check if system_mode exists and has an active SSH connection
+        has_system_mode = hasattr(self, "system_mode") and self.system_mode is not None
+        has_ssh = has_system_mode and hasattr(self.system_mode,
+                                              "ssh_connection") and self.system_mode.ssh_connection is not None
+
+        if not has_ssh and not self.ssh_connected:
             self.append_to_terminal("❌ Cannot set WiFi mode - SSH not connected", "#a93226")  # Red color
             QMessageBox.warning(
                 self,
@@ -1444,7 +1871,11 @@ class ModeSelector(QDialog):
 
             if success:
                 self.append_to_terminal("✅ Successfully switched to WiFi mode", "#1e8449")  # Green color
+                self.append_to_terminal("ℹ️  Pi will connect to Lyman network. You'll need to find the new IP address.",
+                                        "#3498db")  # Blue color
                 self.update_network_mode_status("wifi")
+                # Update IP address field to show a placeholder for WiFi mode
+                self.update_ip_for_mode("wifi")
             else:
                 self.append_to_terminal("❌ Failed to switch to WiFi mode", "#a93226")  # Red color
         else:
@@ -1457,7 +1888,12 @@ class ModeSelector(QDialog):
 
     def set_adhoc_mode(self):
         """Set Pi to Adhoc mode"""
-        if not hasattr(self, "system_mode") or not self.ssh_connected:
+        # Check if system_mode exists and has an active SSH connection
+        has_system_mode = hasattr(self, "system_mode") and self.system_mode is not None
+        has_ssh = has_system_mode and hasattr(self.system_mode,
+                                              "ssh_connection") and self.system_mode.ssh_connection is not None
+
+        if not has_ssh and not self.ssh_connected:
             self.append_to_terminal("❌ Cannot set Adhoc mode - SSH not connected", "#a93226")  # Red color
             QMessageBox.warning(
                 self,
@@ -1474,7 +1910,11 @@ class ModeSelector(QDialog):
 
             if success:
                 self.append_to_terminal("✅ Successfully switched to Adhoc mode", "#1e8449")  # Green color
+                self.append_to_terminal("ℹ️  Pi will create 'cuepishifter' network at 192.168.42.1",
+                                        "#3498db")  # Blue color
                 self.update_network_mode_status("adhoc")
+                # Update IP address field to ad-hoc IP
+                self.update_ip_for_mode("adhoc")
             else:
                 self.append_to_terminal("❌ Failed to switch to Adhoc mode", "#a93226")  # Red color
         else:
@@ -1484,6 +1924,340 @@ class ModeSelector(QDialog):
                 "Adhoc Mode",
                 "Adhoc mode functionality not available in the system mode controller."
             )
+
+    def set_gpio_initial_state(self):
+        """Set all GPIO pins to their initial safe state"""
+        self.append_to_terminal("🔧 Setting GPIO pins to initial state...", "#c4a000")
+
+        try:
+            # Get connection settings from input fields (same as shutdown_pi does)
+            connection_settings = {
+                "host": self.host_input.text(),
+                "username": self.username_input.text(),
+                "password": self.password_input.text(),
+                "port": self.port_input.value()
+            }
+
+            # Create a diagnostic script to check I2C status and GPIO availability
+            init_script = """#!/usr/bin/env python3
+import RPi.GPIO as GPIO
+import sys
+import traceback
+import subprocess
+
+OUTPUT_ENABLE_PINS = [2, 3, 4, 5, 6]
+SERIAL_CLEAR_PINS = [13, 16, 19, 20, 26]
+DATA_PINS = [7, 8, 12, 14, 15]
+SCLK_PINS = [17, 18, 22, 23, 27]
+RCLK_PINS = [9, 10, 11, 24, 25]
+ARM_PIN = 21
+
+print("=" * 70)
+print("GPIO DIAGNOSTIC AND INITIALIZATION SCRIPT")
+print("=" * 70)
+print(f"Python version: {sys.version}")
+print("")
+
+# Check I2C status
+print("STEP 1: Checking I2C status...")
+try:
+    result = subprocess.run(['sudo', 'raspi-config', 'nonint', 'get_i2c'], 
+                          capture_output=True, text=True, timeout=5)
+    i2c_status = result.stdout.strip()
+    if i2c_status == "0":
+        print("  ⚠️  I2C is ENABLED (this reserves GPIO 2 and 3)")
+        print("  💡 Solution: Disable I2C to free GPIO 2 and 3")
+        print("  📝 Run: sudo raspi-config nonint do_i2c 1")
+    elif i2c_status == "1":
+        print("  ✅ I2C is DISABLED (GPIO 2 and 3 should be available)")
+    else:
+        print(f"  ⚠️  Unknown I2C status: {i2c_status}")
+except Exception as e:
+    print(f"  ⚠️  Could not check I2C status: {e}")
+print("")
+
+# Check which GPIOs are in use
+print("STEP 2: Checking which GPIO pins are currently in use...")
+try:
+    result = subprocess.run(['gpioinfo', '0'], capture_output=True, text=True, timeout=5)
+    if result.returncode == 0:
+        used_pins = []
+        for line in result.stdout.split('\\n'):
+            if '[used]' in line:
+                # Extract GPIO number
+                if 'GPIO' in line:
+                    parts = line.split('"')
+                    if len(parts) >= 2:
+                        gpio_name = parts[1]
+                        if gpio_name.startswith('GPIO'):
+                            gpio_num = gpio_name.replace('GPIO', '')
+                            used_pins.append(gpio_num)
+                            print(f"  ⚠️  {line.strip()}")
+
+        if not used_pins:
+            print("  ✅ No GPIO pins are currently in use by other processes")
+        else:
+            print(f"\\n  📋 Summary: GPIOs in use: {', '.join(used_pins)}")
+
+            # Check if any of our pins are in use
+            our_pins = OUTPUT_ENABLE_PINS + SERIAL_CLEAR_PINS + DATA_PINS + SCLK_PINS + RCLK_PINS + [ARM_PIN]
+            conflicts = [p for p in our_pins if str(p) in used_pins]
+            if conflicts:
+                print(f"  ❌ CONFLICT: Our pins {conflicts} are in use!")
+                print(f"  💡 You need to disable I2C or SPI to free these pins")
+except Exception as e:
+    print(f"  ⚠️  Could not check GPIO status: {e}")
+print("")
+
+# Try to initialize GPIOs
+print("STEP 3: Attempting to initialize GPIO pins...")
+try:
+    # First, cleanup any existing GPIO allocations
+    print("  Cleaning up any existing GPIO allocations...")
+    try:
+        GPIO.cleanup()
+        print("  ✅ GPIO cleanup completed")
+    except Exception as cleanup_error:
+        print(f"  ℹ️  GPIO cleanup note: {cleanup_error}")
+
+    print("  Setting GPIO mode to BCM...")
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    print("  ✅ GPIO mode set successfully")
+    print("")
+
+    all_pins = OUTPUT_ENABLE_PINS + SERIAL_CLEAR_PINS + DATA_PINS + SCLK_PINS + RCLK_PINS + [ARM_PIN]
+    print(f"  Total pins to configure: {len(all_pins)}")
+    print("")
+
+    failed_pins = []
+
+    print("  Setting up Output Enable pins (active LOW - HIGH=disabled)...")
+    for pin in OUTPUT_ENABLE_PINS:
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.HIGH)
+            print(f"    ✅ Pin {pin} set to HIGH (disabled)")
+        except Exception as pin_error:
+            print(f"    ❌ Pin {pin} FAILED: {pin_error}")
+            failed_pins.append(pin)
+
+    print("  Setting up Serial Clear pins (active HIGH - LOW=disabled)...")
+    for pin in SERIAL_CLEAR_PINS:
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+            print(f"    ✅ Pin {pin} set to LOW (disabled)")
+        except Exception as pin_error:
+            print(f"    ❌ Pin {pin} FAILED: {pin_error}")
+            failed_pins.append(pin)
+
+    print("  Setting up Data pins...")
+    for pin in DATA_PINS:
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+            print(f"    ✅ Pin {pin} set to LOW")
+        except Exception as pin_error:
+            print(f"    ❌ Pin {pin} FAILED: {pin_error}")
+            failed_pins.append(pin)
+
+    print("  Setting up Serial Clock pins...")
+    for pin in SCLK_PINS:
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+            print(f"    ✅ Pin {pin} set to LOW")
+        except Exception as pin_error:
+            print(f"    ❌ Pin {pin} FAILED: {pin_error}")
+            failed_pins.append(pin)
+
+    print("  Setting up Register Clock pins...")
+    for pin in RCLK_PINS:
+        try:
+            GPIO.setup(pin, GPIO.OUT)
+            GPIO.output(pin, GPIO.LOW)
+            print(f"    ✅ Pin {pin} set to LOW")
+        except Exception as pin_error:
+            print(f"    ❌ Pin {pin} FAILED: {pin_error}")
+            failed_pins.append(pin)
+
+    print(f"  Setting up ARM pin {ARM_PIN}...")
+    try:
+        GPIO.setup(ARM_PIN, GPIO.OUT)
+        GPIO.output(ARM_PIN, GPIO.LOW)
+        print(f"    ✅ ARM pin {ARM_PIN} set to LOW (disarmed)")
+    except Exception as pin_error:
+        print(f"    ❌ ARM pin {ARM_PIN} FAILED: {pin_error}")
+        failed_pins.append(ARM_PIN)
+
+    print("")
+    print("=" * 70)
+
+    if failed_pins:
+        print(f"❌ FAILED: {len(failed_pins)} pins could not be initialized: {failed_pins}")
+        print("")
+        print("SOLUTION:")
+        print("1. Disable I2C: sudo raspi-config nonint do_i2c 1")
+        print("2. Disable SPI if needed: sudo raspi-config nonint do_spi 1")
+        print("3. Reboot: sudo reboot")
+        print("4. Try again")
+        sys.exit(1)
+    else:
+        print("✅ SUCCESS: All GPIO pins initialized to safe state!")
+        print("")
+        print("Pin Configuration:")
+        print(f"  • Output Enable (OE): {OUTPUT_ENABLE_PINS} - HIGH (disabled)")
+        print(f"  • Serial Clear (SRCLR): {SERIAL_CLEAR_PINS} - LOW (disabled)")
+        print(f"  • Data (SDI): {DATA_PINS} - LOW")
+        print(f"  • Serial Clock (SRCLK): {SCLK_PINS} - LOW")
+        print(f"  • Register Clock (RCLK): {RCLK_PINS} - LOW")
+        print(f"  • ARM: {ARM_PIN} - LOW (disarmed)")
+
+        # Save state to file
+        print("")
+        print("Saving state to /tmp/gpio_state.json...")
+        import json
+        import os
+        state = {
+            "outputs_enabled": False,
+            "armed": False,
+            "pin_states": {
+                "output_enable": [True] * 5,
+                "serial_clear": [False] * 5,
+                "data": [False] * 5,
+                "serial_clock": [False] * 5,
+                "register_clock": [False] * 5,
+                "arm": False
+            }
+        }
+
+        # Remove old file if it exists (to avoid permission issues)
+        if os.path.exists("/tmp/gpio_state.json"):
+            os.remove("/tmp/gpio_state.json")
+
+        with open("/tmp/gpio_state.json", "w") as f:
+            json.dump(state, f)
+
+        # Change ownership to the user who will run the other scripts
+        # Get the actual user (not root when using sudo)
+        import pwd
+        actual_user = os.environ.get('SUDO_USER', 'cuepishifter')
+        try:
+            uid = pwd.getpwnam(actual_user).pw_uid
+            gid = pwd.getpwnam(actual_user).pw_gid
+            os.chown("/tmp/gpio_state.json", uid, gid)
+            print(f"State file ownership set to {actual_user}")
+        except Exception as chown_error:
+            print(f"Warning: Could not change ownership: {chown_error}")
+        print("State saved successfully!")
+        sys.exit(0)
+
+except Exception as e:
+    print("")
+    print("=" * 70)
+    print(f"❌ UNEXPECTED ERROR: {str(e)}")
+    print(f"Error type: {type(e).__name__}")
+    print("")
+    print("Full traceback:")
+    traceback.print_exc()
+    sys.exit(1)
+"""
+
+            # Execute using the same pattern as shutdown_pi
+            import paramiko
+            import socket
+
+            self.append_to_terminal(f"🔗 Connecting to {connection_settings['host']}...", "#3465a4")
+
+            # Test basic connectivity
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(5)
+
+            result = sock.connect_ex((connection_settings["host"], connection_settings["port"]))
+            sock.close()
+
+            if result != 0:
+                self.append_to_terminal(f"❌ Cannot reach SSH port {connection_settings['port']}", "#cc0000")
+                QMessageBox.warning(self, "Connection Error", f"Cannot reach SSH port {connection_settings['port']}")
+                return
+
+            # SSH connection
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+            ssh.connect(
+                hostname=connection_settings["host"],
+                port=connection_settings["port"],
+                username=connection_settings["username"],
+                password=connection_settings["password"],
+                timeout=10
+            )
+
+            self.append_to_terminal("✅ Connected via SSH", "#4e9a06")
+
+            # Create the script on the Pi
+            temp_script = "/tmp/init_gpio_state.py"
+            self.append_to_terminal(f"📝 Creating script at {temp_script}...", "#3465a4")
+            stdin, stdout, stderr = ssh.exec_command(f"cat > {temp_script}")
+            stdin.write(init_script)
+            stdin.channel.shutdown_write()
+
+            # Make it executable
+            ssh.exec_command(f"chmod +x {temp_script}")
+            self.append_to_terminal("✅ Script created and made executable", "#4e9a06")
+
+            # Execute the script with sudo to ensure proper GPIO access
+            self.append_to_terminal("⚡ Executing GPIO initialization script with sudo...", "#3465a4")
+            stdin, stdout, stderr = ssh.exec_command(f"sudo python3 {temp_script} 2>&1")
+            exit_status = stdout.channel.recv_exit_status()
+
+            output = stdout.read().decode().strip()
+            error = stderr.read().decode().strip()
+
+            self.append_to_terminal(f"📋 Exit status: {exit_status}", "#3465a4")
+
+            ssh.close()
+
+            # Display all output for debugging
+            if output:
+                self.append_to_terminal("📋 Script output:", "#3465a4")
+                for line in output.split('\n'):
+                    if line.strip():
+                        self.append_to_terminal(f"  {line}", "#3465a4")
+
+            if error:
+                self.append_to_terminal("⚠️ Script stderr:", "#c4a000")
+                for line in error.split('\n'):
+                    if line.strip():
+                        self.append_to_terminal(f"  {line}", "#c4a000")
+
+            if exit_status == 0 and "SUCCESS" in output:
+                self.append_to_terminal("✅ GPIO pins initialized successfully", "#1e8449")
+
+                QMessageBox.information(
+                    self,
+                    "GPIO State Set",
+                    "All GPIO pins have been set to their initial safe state:\n\n"
+                    "• Output Enable (2,3,4,5,6): HIGH (disabled)\n"
+                    "• Serial Clear (13,16,19,20,26): LOW (disabled)\n"
+                    "• All other pins: LOW\n"
+                    "• Arm pin (21): LOW (disarmed)\n\n"
+                    "You can now test the Enable Outputs and Arm buttons."
+                )
+            else:
+                error_msg = error if error else output if output else "Unknown error - no output received"
+                self.append_to_terminal(f"❌ Failed to set GPIO state", "#a93226")
+                QMessageBox.warning(self, "GPIO State Error",
+                                    f"Failed to set GPIO state (exit code: {exit_status}):\n\n{error_msg}")
+
+        except Exception as e:
+            import traceback
+            error_details = traceback.format_exc()
+            self.append_to_terminal(f"❌ Exception: {str(e)}", "#a93226")
+            self.append_to_terminal(f"📋 Traceback: {error_details}", "#a93226")
+            QMessageBox.warning(self, "GPIO State Error",
+                                f"Error setting GPIO state:\n\n{str(e)}\n\nSee terminal for full traceback")
 
     def execute_pi_command(self, command, operation_name):
         """Execute a command on the Raspberry Pi"""
@@ -1648,8 +2422,11 @@ class ModeSelector(QDialog):
         """Handle command from the enhanced terminal"""
         cmd = command.strip()
 
-        # Handle SSH command specially
+        print(f"[DEBUG] handle_terminal_command: cmd='{cmd}', pi_mode={self.terminal_widget.pi_mode}")
+
+        # Handle SSH command specially (works in both modes)
         if cmd.startswith("ssh "):
+            print("[DEBUG] Detected SSH command, calling _handle_ssh_command")
             self._handle_ssh_command(command)
             return
 
@@ -1661,18 +2438,20 @@ class ModeSelector(QDialog):
 
         # If we're in macOS mode and not an SSH command, simulate local execution
         if not self.terminal_widget.pi_mode:
+            print("[DEBUG] macOS mode, calling _simulate_local_command")
             self._simulate_local_command(command)
             return
 
-        # For Pi mode, execute on the Pi
+        # For Pi mode, execute on the Pi using session manager
         if not self.host_input.text():
             self.terminal_widget.append_text("❌ Error: No host specified\n", "#cc0000")
             self.terminal_widget.append_text("   Please configure connection settings first\n", "#cc0000")
             self.terminal_widget.show_prompt()
             return
 
-        # Execute the command directly on the Pi
-        self.execute_terminal_command_direct(command)
+        # NEW: Use session manager to execute command
+        print("[DEBUG] Pi mode, calling _execute_command_via_session_manager")
+        self._execute_command_via_session_manager(command)
 
     def _handle_ssh_command(self, command):
         """Handle SSH command specially to connect to the Pi"""
@@ -1698,15 +2477,241 @@ class ModeSelector(QDialog):
         self.host_input.setText(hostname)
         self.username_input.setText(username)
 
-        # Simulate password prompt
-        self.terminal_widget.append_text(f"{username}@{hostname}'s password: ", "#ffffff")
+        # NEW: Use session manager to connect
+        password = self.password_input.text()
+        port = self.port_input.value()
 
-        # Set a flag to handle the next command as a password
-        self.terminal_widget.waiting_for_password = True
-        self.terminal_widget.password_target = (username, hostname)
+        # Update session manager settings
+        self.terminal_widget.session_manager.set_connection_settings(
+            hostname, port, username, password
+        )
 
-        # Don't show prompt - we're waiting for password input
-        return
+        # Connect via session manager
+        success, message = self.terminal_widget.session_manager.connect()
+
+        if success:
+            self.terminal_widget.append_text(f"✅ {message}\n", "#2ecc71")
+            self.terminal_widget.pi_mode = True
+            self.terminal_widget.prompt = self.terminal_widget.pi_prompt
+
+            # Switch to hardware mode
+            self.hardware_radio.setChecked(True)
+            self.ssh_connected = True
+
+            # Update connection status widget
+            if hasattr(self, 'connection_status_bar'):
+                self.connection_status_bar.set_connected(True, hostname, username)
+
+            # Notify main window to switch to hardware mode
+            if hasattr(self, 'main_window') and self.main_window:
+                connection_settings = {
+                    "host": hostname,
+                    "port": port,
+                    "username": username,
+                    "password": password
+                }
+                self.main_window.queue_mode_change("hardware", connection_settings, "ssh")
+        else:
+            self.terminal_widget.append_text(f"❌ Connection failed: {message}\n", "#e74c3c")
+            self.terminal_widget.pi_mode = False
+
+        self.terminal_widget.show_prompt()
+
+    def _execute_command_via_session_manager(self, command):
+        """Execute command via session manager (NEW) - Threaded version"""
+        from PySide6.QtCore import QRunnable, QThreadPool, Slot, QObject, Signal
+
+        # Check if this is a nano command - use our custom file editor instead of PTY
+        cmd_parts = command.split()
+        if 'nano' in cmd_parts[0] or (len(cmd_parts) > 1 and cmd_parts[0] == 'sudo' and 'nano' in cmd_parts[1]):
+            self._handle_nano_command(command)
+            return
+
+        # Create signals class for thread communication
+        class WorkerSignals(QObject):
+            finished = Signal(bool, str)  # success, output
+            error = Signal(str)
+
+        # Create worker class
+        class CommandWorker(QRunnable):
+            def __init__(self, dialog, command):
+                super().__init__()
+                self.dialog = dialog
+                self.command = command
+                self.signals = WorkerSignals()
+
+            @Slot()
+            def run(self):
+                print(f"[DEBUG] CommandWorker.run() started for command: {self.command}")
+                try:
+                    # Ensure we're connected
+                    print("[DEBUG] Checking if connected...")
+                    if not self.dialog.terminal_widget.session_manager.is_connected():
+                        print("[DEBUG] Not connected, attempting to connect...")
+                        # Try to connect first
+                        password = self.dialog.password_input.text()
+                        port = self.dialog.port_input.value()
+                        host = self.dialog.host_input.text()
+                        username = self.dialog.username_input.text()
+
+                        print(f"[DEBUG] Connection settings: {username}@{host}:{port}")
+
+                        self.dialog.terminal_widget.session_manager.set_connection_settings(
+                            host, port, username, password
+                        )
+
+                        print("[DEBUG] Calling session_manager.connect()...")
+                        success, message = self.dialog.terminal_widget.session_manager.connect()
+                        print(f"[DEBUG] Connect result: success={success}, message={message}")
+
+                        if not success:
+                            print(f"[DEBUG] Connection failed: {message}")
+                            self.signals.error.emit(f"Connection failed: {message}")
+                            return
+                    else:
+                        print("[DEBUG] Already connected")
+
+                    # Execute command via session manager
+                    print(f"[DEBUG] Executing command: {self.command}")
+                    success, output = self.dialog.terminal_widget.session_manager.execute_command(self.command)
+                    print(f"[DEBUG] Command result: success={success}, output length={len(output) if output else 0}")
+
+                    self.signals.finished.emit(success, output)
+                    print("[DEBUG] CommandWorker.run() completed successfully")
+
+                except Exception as e:
+                    print(f"[DEBUG] CommandWorker.run() exception: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    self.signals.error.emit(str(e))
+
+        # Create and configure worker
+        worker = CommandWorker(self, command)
+
+        # Connect signals
+        worker.signals.finished.connect(self._handle_command_result)
+        worker.signals.error.connect(self._handle_command_error)
+
+        # Show executing message
+        self.terminal_widget.append_text(f"⏳ Executing: {command}\n", "#888888")
+
+        # Start worker in thread pool
+        QThreadPool.globalInstance().start(worker)
+
+    def _handle_command_result(self, success, output):
+        """Handle command execution result (called from worker thread)"""
+        if success:
+            if output:
+                self.terminal_widget.append_text(output)
+
+            # NEW: Update last activity in status widget
+            if hasattr(self, 'connection_status_bar'):
+                self.connection_status_bar.update_last_activity()
+        else:
+            self.terminal_widget.append_text(f"❌ Command failed: {output}\n", "#e74c3c")
+
+        # Show prompt after command completes
+        if not self.terminal_widget.session_manager.pty_mode:
+            self.terminal_widget.show_prompt()
+
+    def _handle_command_error(self, error):
+        """Handle command execution error (called from worker thread)"""
+        self.terminal_widget.append_text(f"❌ Error: {error}\n", "#e74c3c")
+        self.terminal_widget.show_prompt()
+
+    def _handle_nano_command(self, command):
+        """Handle nano command with custom file editor - Threaded version"""
+        from PySide6.QtCore import QRunnable, QThreadPool, Slot, QObject, Signal
+        import paramiko
+
+        # Extract filename from nano command
+        parts = command.split()
+
+        # Handle both "nano file.txt" and "sudo nano file.txt"
+        if parts[0] == 'sudo':
+            if len(parts) < 3:
+                self.terminal_widget.append_text("❌ Usage: sudo nano <filename>\n", "#cc0000")
+                self.terminal_widget.show_prompt()
+                return
+            filename = parts[-1]  # Last argument is the filename
+            use_sudo = True
+        else:
+            if len(parts) < 2:
+                self.terminal_widget.append_text("❌ Usage: nano <filename>\n", "#cc0000")
+                self.terminal_widget.show_prompt()
+                return
+            filename = parts[-1]  # Last argument is the filename
+            use_sudo = False
+
+        if use_sudo:
+            self.terminal_widget.append_text(f"📝 Opening file editor for '{filename}' (with sudo)...\n", "#3498db")
+        else:
+            self.terminal_widget.append_text(f"📝 Opening file editor for '{filename}'...\n", "#3498db")
+
+        # Create signals class
+        class NanoWorkerSignals(QObject):
+            ready = Signal(object)  # ssh_client
+            error = Signal(str)
+
+        # Create worker class
+        class NanoWorker(QRunnable):
+            def __init__(self, dialog, filename):
+                super().__init__()
+                self.dialog = dialog
+                self.filename = filename
+                self.signals = NanoWorkerSignals()
+
+            @Slot()
+            def run(self):
+                try:
+                    # Create fresh SSH connection for file editor
+                    ssh = paramiko.SSHClient()
+                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                    ssh.connect(
+                        hostname=self.dialog.host_input.text(),
+                        port=self.dialog.port_input.value(),
+                        username=self.dialog.username_input.text(),
+                        password=self.dialog.password_input.text(),
+                        timeout=10
+                    )
+
+                    self.signals.ready.emit(ssh)
+
+                except Exception as e:
+                    self.signals.error.emit(str(e))
+
+        # Create worker
+        worker = NanoWorker(self, filename)
+
+        # Connect signals
+        def on_ssh_ready(ssh):
+            try:
+                # Launch file editor on main thread
+                editor = SimpleFileEditor(filename, ssh_client=ssh, parent=self)
+                result = editor.exec()
+
+                if result == QDialog.Accepted:
+                    self.terminal_widget.append_text(f"✅ File '{filename}' saved successfully.\n", "#2ecc71")
+                else:
+                    self.terminal_widget.append_text(f"ℹ️ File editor closed without saving.\n", "#f39c12")
+
+                ssh.close()
+
+            except Exception as e:
+                self.terminal_widget.append_text(f"❌ Error opening file editor: {str(e)}\n", "#e74c3c")
+
+            self.terminal_widget.show_prompt()
+
+        def on_error(error):
+            self.terminal_widget.append_text(f"❌ Error connecting: {error}\n", "#e74c3c")
+            self.terminal_widget.show_prompt()
+
+        worker.signals.ready.connect(on_ssh_ready)
+        worker.signals.error.connect(on_error)
+
+        # Start worker
+        QThreadPool.globalInstance().start(worker)
 
     def _simulate_local_command(self, command):
         """Simulate execution of local commands in macOS terminal"""
@@ -1720,6 +2725,14 @@ class ModeSelector(QDialog):
         # Handle file help command
         if cmd == "help files" or cmd == "filehelp":
             self.terminal_widget.show_file_operation_help()
+            self.terminal_widget.show_prompt()
+            return
+
+        # Handle echo command specially (for test connection)
+        if cmd.startswith("echo "):
+            # Extract the text to echo
+            echo_text = cmd[5:].strip().strip("'&quot;")
+            self.terminal_widget.append_text(echo_text + "\n")
             self.terminal_widget.show_prompt()
             return
 
@@ -2185,6 +3198,26 @@ class ModeSelector(QDialog):
         # If hardware mode is selected, attempt to connect automatically
         if selected_mode == "hardware" and not self.ssh_connected:
             self.test_ssh_connection_simple(connection_settings)
+
+        # Update connection status widget based on mode
+        if hasattr(self, 'connection_status_bar'):
+            if selected_mode == "hardware":
+                # Check if terminal is connected
+                if hasattr(self, 'terminal_widget') and self.terminal_widget.pi_mode:
+                    self.connection_status_bar.set_connected(
+                        True,
+                        connection_settings["host"],
+                        connection_settings["username"]
+                    )
+                elif self.ssh_connected:
+                    self.connection_status_bar.set_connected(
+                        True,
+                        connection_settings["host"],
+                        connection_settings["username"]
+                    )
+            else:
+                # Simulation mode - show disconnected
+                self.connection_status_bar.set_connected(False)
 
         # Emit signal with new mode and settings
         self.mode_changed.emit(selected_mode, connection_settings, "ssh")

@@ -1,95 +1,89 @@
 #!/usr/bin/env python3
 """
-Arm/Disarm Control Script for Raspberry Pi
-
-This script controls the ARM pin for the firework control system.
-
-Usage:
-    python3 set_arm_state.py --armed=1  # Arm the system
-    python3 set_arm_state.py --armed=0  # Disarm the system
+Set ARM pin state for firework control system
 """
-
-import argparse
 import RPi.GPIO as GPIO
-import time
 import sys
-import logging
+import json
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("/home/pi/gpio_control.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("arm_control")
+# GPIO Pin Definitions (BCM numbering)
+ARM_PIN = 21  # Active HIGH (HIGH=armed, LOW=disarmed)
 
-# GPIO Pin Configuration
-# Arm control pin - Active HIGH (LOW when disarmed, HIGH when armed)
-ARM_PIN = 21
-ARM_ACTIVE_HIGH = True  # HIGH = armed
-
+# State file location
+STATE_FILE = "/tmp/gpio_state.json"
 
 def setup_gpio():
     """Initialize GPIO pins"""
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    GPIO.setup(ARM_PIN, GPIO.OUT)
+
+def save_state(armed):
+    """Save current GPIO state to file"""
     try:
-        # Use BCM pin numbering
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
-
-        # Setup ARM pin as output
-        GPIO.setup(ARM_PIN, GPIO.OUT)
-
-        logger.info("GPIO pins initialized successfully")
-        return True
+        # Read existing state to preserve outputs_enabled status
+        state = {
+            "outputs_enabled": False,
+            "armed": armed,
+            "pin_states": {
+                "output_enable": [True] * 5,
+                "serial_clear": [False] * 5,
+                "data": [False] * 5,
+                "serial_clock": [False] * 5,
+                "register_clock": [False] * 5,
+                "arm": armed
+            }
+        }
+        
+        # Try to read existing state to preserve outputs_enabled status
+        try:
+            with open(STATE_FILE, 'r') as f:
+                existing_state = json.load(f)
+                state["outputs_enabled"] = existing_state.get("outputs_enabled", False)
+                state["pin_states"]["output_enable"] = existing_state.get("pin_states", {}).get("output_enable", [True] * 5)
+                state["pin_states"]["serial_clear"] = existing_state.get("pin_states", {}).get("serial_clear", [False] * 5)
+        except:
+            pass
+        
+        with open(STATE_FILE, 'w') as f:
+            json.dump(state, f)
     except Exception as e:
-        logger.error(f"GPIO setup failed: {e}")
-        return False
+        pass  # Don't fail if we can't write state file
 
+def arm():
+    """Arm the system"""
+    GPIO.output(ARM_PIN, GPIO.HIGH)
+    save_state(True)
+    return {"status": "success", "armed": True}
 
-def set_arm_state(armed):
-    """
-    Set the arm state of the system
-
-    Args:
-        armed (bool): True to arm, False to disarm
-    """
-    try:
-        # Set ARM pin state based on active high/low configuration
-        pin_state = GPIO.HIGH if (armed and ARM_ACTIVE_HIGH) or (not armed and not ARM_ACTIVE_HIGH) else GPIO.LOW
-        GPIO.output(ARM_PIN, pin_state)
-
-        status = "ARMED" if armed else "DISARMED"
-        logger.info(f"System {status} - ARM pin {ARM_PIN} set to {pin_state}")
-        return True
-    except Exception as e:
-        logger.error(f"Failed to {'arm' if armed else 'disarm'} system: {e}")
-        return False
-
+def disarm():
+    """Disarm the system"""
+    GPIO.output(ARM_PIN, GPIO.LOW)
+    save_state(False)
+    return {"status": "success", "armed": False}
 
 def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description="Arm/disarm firework control system")
-    parser.add_argument("--armed", type=int, required=True, choices=[0, 1],
-                        help="1 to arm the system, 0 to disarm")
-
-    args = parser.parse_args()
-    armed = bool(args.armed)
-
-    if setup_gpio():
-        success = set_arm_state(armed)
-        if success:
-            print(f"System {'armed' if armed else 'disarmed'} successfully")
-            sys.exit(0)
+    import argparse
+    
+    parser = argparse.ArgumentParser(description='Set arm state')
+    parser.add_argument('--armed', type=int, choices=[0, 1], required=True,
+                        help='Arm (1) or disarm (0) the system')
+    
+    try:
+        args = parser.parse_args()
+        setup_gpio()
+        
+        if args.armed == 1:
+            result = arm()
         else:
-            print(f"Failed to {'arm' if armed else 'disarm'} system")
-            sys.exit(1)
-    else:
-        print("GPIO setup failed")
+            result = disarm()
+        
+        print(json.dumps(result))
+        sys.exit(0 if result["status"] == "success" else 1)
+        
+    except Exception as e:
+        print(json.dumps({"status": "error", "message": str(e)}))
         sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

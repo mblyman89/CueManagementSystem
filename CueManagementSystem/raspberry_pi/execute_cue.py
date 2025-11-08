@@ -1,464 +1,237 @@
 #!/usr/bin/env python3
 """
-Execute Cue Script for Raspberry Pi
-
-This script executes a single cue by controlling the appropriate GPIO pins
-based on the cue data received.
-
-Usage:
-    python3 execute_cue.py --cue=1 --type="SINGLE SHOT" --outputs="1,2,3"
+Execute a single cue on the shift registers
 """
-
-import argparse
 import RPi.GPIO as GPIO
-import time
 import sys
 import json
-import logging
-from typing import List, Dict, Any
+import time
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler("/home/pi/cue_execution.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
-)
-logger = logging.getLogger("execute_cue")
-
-# GPIO Pin Configuration
-# Data pins for each chain (5 chains)
+# GPIO Pin Definitions (BCM numbering)
+OUTPUT_ENABLE_PINS = [2, 3, 4, 5, 6]
+SERIAL_CLEAR_PINS = [13, 16, 19, 20, 26]
 DATA_PINS = [7, 8, 12, 14, 15]
-
-# Serial Clock pins (5 chains)
 SCLK_PINS = [17, 18, 22, 23, 27]
-
-# Register Clock pins (5 chains)
 RCLK_PINS = [9, 10, 11, 24, 25]
+ARM_PIN = 21
 
-# Default timing parameters
-PULSE_DURATION_MS = 1000  # Changed from 100 to 1000 (1 second) as per requirements
-REGISTER_DELAY_US = 10  # Delay between register operations in microseconds
-
+# Constants
+OUTPUTS_PER_CHAIN = 200
+REGISTERS_PER_CHAIN = 25
+BITS_PER_REGISTER = 8
 
 def setup_gpio():
     """Initialize GPIO pins"""
-    try:
-        # Use BCM pin numbering
-        GPIO.setmode(GPIO.BCM)
-        GPIO.setwarnings(False)
+    GPIO.setmode(GPIO.BCM)
+    GPIO.setwarnings(False)
+    
+    for pin in OUTPUT_ENABLE_PINS + SERIAL_CLEAR_PINS + DATA_PINS + SCLK_PINS + RCLK_PINS + [ARM_PIN]:
+        GPIO.setup(pin, GPIO.OUT)
 
-        # Setup Data pins as outputs
-        for pin in DATA_PINS:
-            GPIO.setup(pin, GPIO.OUT)
-            GPIO.output(pin, GPIO.LOW)
+def get_chain_for_output(output_num):
+    """Determine which chain an output belongs to (0-4)"""
+    return (output_num - 1) // OUTPUTS_PER_CHAIN
 
-        # Setup Serial Clock pins as outputs
-        for pin in SCLK_PINS:
-            GPIO.setup(pin, GPIO.OUT)
-            GPIO.output(pin, GPIO.LOW)
+def get_bit_position_in_chain(output_num):
+    """Get the bit position within a chain (0-199)"""
+    return (output_num - 1) % OUTPUTS_PER_CHAIN
 
-        # Setup Register Clock pins as outputs
-        for pin in RCLK_PINS:
-            GPIO.setup(pin, GPIO.OUT)
-            GPIO.output(pin, GPIO.LOW)
-
-        logger.info("GPIO pins initialized successfully")
-        return True
-    except Exception as e:
-        logger.error(f"GPIO setup failed: {e}")
-        return False
-
-
-def determine_chain_for_output(output_number: int) -> int:
+def shift_out_data(chain, data_bits):
     """
-    Determine which chain an output belongs to
-
-    Args:
-        output_number: The output number (1-1000)
-
-    Returns:
-        int: Chain number (0-4) or -1 if invalid
+    Shift out 200 bits of data to a specific chain
+    Optimized for speed - GPIO operations provide sufficient delay
     """
-    if output_number < 1 or output_number > 1000:
-        return -1
-
-    # Each chain handles 200 outputs (5 chains × 200 outputs = 1000 total)
-    return (output_number - 1) // 200
-
-
-def determine_register_for_output(output_number: int) -> int:
-    """
-    Determine which register within a chain an output belongs to
-
-    Args:
-        output_number: The output number (1-1000)
-
-    Returns:
-        int: Register number within chain (0-24) or -1 if invalid
-    """
-    if output_number < 1 or output_number > 1000:
-        return -1
-
-    # Each register handles 8 outputs, 25 registers per chain
-    chain = determine_chain_for_output(output_number)
-    if chain == -1:
-        return -1
-
-    # Calculate position within chain (0-199)
-    position_in_chain = (output_number - 1) % 200
-
-    # Calculate register number (0-24)
-    return position_in_chain // 8
-
-
-def determine_bit_for_output(output_number: int) -> int:
-    """
-    Determine which bit within a register an output belongs to
-
-    Args:
-        output_number: The output number (1-1000)
-
-    Returns:
-        int: Bit position (0-7) or -1 if invalid
-    """
-    if output_number < 1 or output_number > 1000:
-        return -1
-
-    # Calculate position within register (0-7)
-    return (output_number - 1) % 8
-
-
-def shift_out_data(chain: int, data_byte: int):
-    """
-    Shift out a byte of data to a specific chain
-
-    Args:
-        chain: Chain number (0-4)
-        data_byte: Byte to shift out (0-255)
-    """
-    if chain < 0 or chain >= len(DATA_PINS):
-        logger.error(f"Invalid chain number: {chain}")
-        return
-
-    # Get pins for this chain
     data_pin = DATA_PINS[chain]
-    sclk_pin = SCLK_PINS[chain]
-
-    # Shift out 8 bits, MSB first
-    for i in range(7, -1, -1):
-        # Set data bit
-        bit = (data_byte >> i) & 1
+    clock_pin = SCLK_PINS[chain]
+    latch_pin = RCLK_PINS[chain]
+    
+    # Shift out data (MSB first)
+    # No sleep needed - GPIO operations are slow enough for 74HC595
+    for bit in reversed(data_bits):
         GPIO.output(data_pin, bit)
+        GPIO.output(clock_pin, GPIO.HIGH)
+        GPIO.output(clock_pin, GPIO.LOW)
+    
+    # Latch the data
+    GPIO.output(latch_pin, GPIO.HIGH)
+    GPIO.output(latch_pin, GPIO.LOW)
 
-        # Pulse clock to shift in bit
-        GPIO.output(sclk_pin, GPIO.HIGH)
-        time.sleep(REGISTER_DELAY_US / 1000000.0)  # Convert to seconds
-        GPIO.output(sclk_pin, GPIO.LOW)
-        time.sleep(REGISTER_DELAY_US / 1000000.0)  # Convert to seconds
+def fire_output(output_num, duration_ms):
+    """Fire a single output for specified duration"""
+    chain = get_chain_for_output(output_num)
+    bit_pos = get_bit_position_in_chain(output_num)
+    
+    # Create data array (200 bits, all 0 except the target bit)
+    data_bits = [0] * OUTPUTS_PER_CHAIN
+    data_bits[bit_pos] = 1
+    
+    # Shift out data to turn on the output
+    shift_out_data(chain, data_bits)
+    
+    # Wait for duration
+    time.sleep(duration_ms / 1000.0)
+    
+    # Clear the output
+    data_bits[bit_pos] = 0
+    shift_out_data(chain, data_bits)
 
-
-def latch_registers(chain: int):
-    """
-    Latch the shift register data to the storage register for a specific chain
-
-    Args:
-        chain: Chain number (0-4)
-    """
-    if chain < 0 or chain >= len(RCLK_PINS):
-        logger.error(f"Invalid chain number: {chain}")
-        return
-
-    # Get register clock pin for this chain
-    rclk_pin = RCLK_PINS[chain]
-
-    # Pulse register clock to latch data
-    GPIO.output(rclk_pin, GPIO.HIGH)
-    time.sleep(REGISTER_DELAY_US / 1000000.0)  # Convert to seconds
-    GPIO.output(rclk_pin, GPIO.LOW)
-
-
-def execute_single_shot(output_number: int):
-    """
-    Execute a single shot cue
-
-    Args:
-        output_number: The output number to fire (1-1000)
-    """
-    # Determine chain, register, and bit
-    chain = determine_chain_for_output(output_number)
-    register = determine_register_for_output(output_number)
-    bit = determine_bit_for_output(output_number)
-
-    if chain == -1 or register == -1 or bit == -1:
-        logger.error(f"Invalid output number: {output_number}")
-        return False
-
-    logger.info(
-        f"Executing SINGLE SHOT for output {output_number} (Chain: {chain + 1}, Register: {register}, Bit: {bit})")
-
-    try:
-        # Create data byte with single bit set
-        data_byte = 1 << bit
-
-        # Clear all registers in the chain first
-        for i in range(25):  # 25 registers per chain
-            shift_out_data(chain, 0)
-        latch_registers(chain)
-
-        # Shift out data for the target register
-        for i in range(24, -1, -1):  # Shift from last register to first
-            if i == register:
-                shift_out_data(chain, data_byte)  # Set the target register
-            else:
-                shift_out_data(chain, 0)  # Clear other registers
-
-        # Latch the data
-        latch_registers(chain)
-
-        # Wait for pulse duration
-        time.sleep(PULSE_DURATION_MS / 1000.0)  # Convert to seconds
-
-        # Clear all registers
-        for i in range(25):  # 25 registers per chain
-            shift_out_data(chain, 0)
-        latch_registers(chain)
-
-        return True
-    except Exception as e:
-        logger.error(f"Error executing single shot: {e}")
-        return False
-
-
-def execute_double_shot(output1: int, output2: int):
-    """
-    Execute a double shot cue
-
-    Args:
-        output1: First output number to fire (1-1000)
-        output2: Second output number to fire (1-1000)
-    """
-    # Determine chain, register, and bit for first output
-    chain1 = determine_chain_for_output(output1)
-    register1 = determine_register_for_output(output1)
-    bit1 = determine_bit_for_output(output1)
-
-    # Determine chain, register, and bit for second output
-    chain2 = determine_chain_for_output(output2)
-    register2 = determine_register_for_output(output2)
-    bit2 = determine_bit_for_output(output2)
-
-    if chain1 == -1 or register1 == -1 or bit1 == -1 or chain2 == -1 or register2 == -1 or bit2 == -1:
-        logger.error(f"Invalid output numbers: {output1}, {output2}")
-        return False
-
-    logger.info(f"Executing DOUBLE SHOT for outputs {output1}, {output2}")
-
-    try:
-        # Handle case where outputs are on different chains
-        if chain1 != chain2:
-            # Execute each output separately
-            execute_single_shot(output1)
-            execute_single_shot(output2)
-            return True
-
-        # Handle case where outputs are on the same chain
-        chain = chain1  # Same as chain2
-
-        # Create data bytes
-        data_byte1 = 1 << bit1
-        data_byte2 = 1 << bit2
-
-        # Clear all registers in the chain first
-        for i in range(25):  # 25 registers per chain
-            shift_out_data(chain, 0)
-        latch_registers(chain)
-
-        # Shift out data for the target registers
-        for i in range(24, -1, -1):  # Shift from last register to first
-            if i == register1 and i == register2:  # Same register
-                shift_out_data(chain, data_byte1 | data_byte2)  # Combine bits
-            elif i == register1:
-                shift_out_data(chain, data_byte1)
-            elif i == register2:
-                shift_out_data(chain, data_byte2)
-            else:
-                shift_out_data(chain, 0)  # Clear other registers
-
-        # Latch the data
-        latch_registers(chain)
-
-        # Wait for pulse duration
-        time.sleep(PULSE_DURATION_MS / 1000.0)  # Convert to seconds
-
-        # Clear all registers
-        for i in range(25):  # 25 registers per chain
-            shift_out_data(chain, 0)
-        latch_registers(chain)
-
-        return True
-    except Exception as e:
-        logger.error(f"Error executing double shot: {e}")
-        return False
-
-
-def execute_run(outputs: List[int], delay_ms: float):
-    """
-    Execute a run cue (sequential firing with delay)
-
-    Args:
-        outputs: List of output numbers to fire in sequence
-        delay_ms: Delay between outputs in milliseconds
-    """
-    logger.info(f"Executing RUN for {len(outputs)} outputs with {delay_ms}ms delay")
-
-    try:
-        for output in outputs:
-            # Fire each output
-            execute_single_shot(output)
-
-            # Wait for delay before next output
-            if output != outputs[-1]:  # Don't delay after last output
-                time.sleep(delay_ms / 1000.0)  # Convert to seconds
-
-        return True
-    except Exception as e:
-        logger.error(f"Error executing run: {e}")
-        return False
-
-
-def execute_double_run(outputs: List[int], delay_ms: float):
-    """
-    Execute a double run cue (sequential firing of pairs with delay)
-
-    Args:
-        outputs: List of output numbers to fire in sequence (must be even length)
-        delay_ms: Delay between pairs in milliseconds
-    """
-    if len(outputs) % 2 != 0:
-        logger.error(f"Double run requires even number of outputs, got {len(outputs)}")
-        return False
-
-    logger.info(f"Executing DOUBLE RUN for {len(outputs)} outputs with {delay_ms}ms delay")
-
-    try:
-        # Process outputs in pairs
-        for i in range(0, len(outputs), 2):
-            if i + 1 < len(outputs):
-                # Fire pair of outputs
-                execute_double_shot(outputs[i], outputs[i + 1])
-
-                # Wait for delay before next pair
-                if i + 2 < len(outputs):  # Don't delay after last pair
-                    time.sleep(delay_ms / 1000.0)  # Convert to seconds
-
-        return True
-    except Exception as e:
-        logger.error(f"Error executing double run: {e}")
-        return False
-
-
-def execute_cue(cue_number: int, cue_type: str, outputs: List[int], delay: float = 0.0):
-    """
-    Execute a cue based on its type
-
-    Args:
-        cue_number: Cue number for identification
-        cue_type: Type of cue (SINGLE SHOT, DOUBLE SHOT, SINGLE RUN, DOUBLE RUN)
-        outputs: List of output numbers
-        delay: Delay between outputs in seconds (for RUN types)
-    """
-    logger.info(f"Executing cue #{cue_number} of type {cue_type} with {len(outputs)} outputs")
-
-    try:
-        if not outputs:
-            logger.error("No outputs specified")
-            return False
-
-        # Convert delay to milliseconds
-        delay_ms = delay * 1000.0
-
-        # Execute based on cue type
-        if cue_type == "SINGLE SHOT":
-            return execute_single_shot(outputs[0])
-        elif cue_type == "DOUBLE SHOT":
-            if len(outputs) < 2:
-                logger.error(f"DOUBLE SHOT requires 2 outputs, got {len(outputs)}")
-                return False
-            return execute_double_shot(outputs[0], outputs[1])
-        elif cue_type == "SINGLE RUN":
-            return execute_run(outputs, delay_ms)
-        elif cue_type == "DOUBLE RUN":
-            return execute_double_run(outputs, delay_ms)
+def execute_cue(cue_data):
+    """Execute a cue based on its type"""
+    cue_type = cue_data.get('type')
+    
+    if cue_type == 'SINGLE SHOT':
+        output = cue_data.get('output')
+        duration = cue_data.get('duration', 1000)  # Changed to 1 second default
+        fire_output(output, duration)
+        
+    elif cue_type == 'DOUBLE SHOT':
+        output1 = cue_data.get('output1')
+        output2 = cue_data.get('output2')
+        duration = cue_data.get('duration', 1000)  # Changed to 1 second default
+        
+        # Fire both outputs simultaneously
+        chain1 = get_chain_for_output(output1)
+        chain2 = get_chain_for_output(output2)
+        bit_pos1 = get_bit_position_in_chain(output1)
+        bit_pos2 = get_bit_position_in_chain(output2)
+        
+        # If same chain, combine bits
+        if chain1 == chain2:
+            data_bits = [0] * OUTPUTS_PER_CHAIN
+            data_bits[bit_pos1] = 1
+            data_bits[bit_pos2] = 1
+            shift_out_data(chain1, data_bits)
+            time.sleep(duration / 1000.0)
+            data_bits[bit_pos1] = 0
+            data_bits[bit_pos2] = 0
+            shift_out_data(chain1, data_bits)
         else:
-            logger.error(f"Unknown cue type: {cue_type}")
-            return False
-    except Exception as e:
-        logger.error(f"Error executing cue: {e}")
-        return False
-
-
-def parse_outputs(outputs_str: str) -> List[int]:
-    """
-    Parse outputs string to list of integers
-
-    Args:
-        outputs_str: Comma-separated list of outputs
-
-    Returns:
-        List of output numbers
-    """
-    try:
-        return [int(x.strip()) for x in outputs_str.split(',') if x.strip()]
-    except Exception as e:
-        logger.error(f"Error parsing outputs: {e}")
-        return []
-
+            # Different chains - fire separately but quickly
+            data_bits1 = [0] * OUTPUTS_PER_CHAIN
+            data_bits1[bit_pos1] = 1
+            data_bits2 = [0] * OUTPUTS_PER_CHAIN
+            data_bits2[bit_pos2] = 1
+            
+            shift_out_data(chain1, data_bits1)
+            shift_out_data(chain2, data_bits2)
+            time.sleep(duration / 1000.0)
+            
+            data_bits1[bit_pos1] = 0
+            data_bits2[bit_pos2] = 0
+            shift_out_data(chain1, data_bits1)
+            shift_out_data(chain2, data_bits2)
+    
+    elif cue_type == 'SINGLE RUN':
+        start_output = cue_data.get('start_output')
+        end_output = cue_data.get('end_output')
+        delay = cue_data.get('delay', 100)
+        
+        # Get chain and create data array
+        chain = get_chain_for_output(start_output)
+        data_bits = [0] * OUTPUTS_PER_CHAIN
+        
+        # Turn on outputs sequentially, keeping previous ones on
+        for output in range(start_output, end_output + 1):
+            bit_pos = get_bit_position_in_chain(output)
+            data_bits[bit_pos] = 1
+            shift_out_data(chain, data_bits)
+            
+            if output < end_output:
+                time.sleep(delay / 1000.0)
+        
+        # Hold all outputs on for 1 second
+        time.sleep(1.0)
+        
+        # Turn off all outputs in the run
+        for output in range(start_output, end_output + 1):
+            bit_pos = get_bit_position_in_chain(output)
+            data_bits[bit_pos] = 0
+        shift_out_data(chain, data_bits)
+    
+    elif cue_type == 'DOUBLE RUN':
+        start_output1 = cue_data.get('start_output1')
+        end_output1 = cue_data.get('end_output1')
+        start_output2 = cue_data.get('start_output2')
+        end_output2 = cue_data.get('end_output2')
+        delay = cue_data.get('delay', 100)
+        
+        # Get chains for both runs
+        chain1 = get_chain_for_output(start_output1)
+        chain2 = get_chain_for_output(start_output2)
+        
+        # Create data arrays for each chain
+        data_bits1 = [0] * OUTPUTS_PER_CHAIN
+        data_bits2 = [0] * OUTPUTS_PER_CHAIN
+        
+        # Turn on output pairs sequentially, keeping previous ones on
+        num_pairs = max(end_output1 - start_output1 + 1, end_output2 - start_output2 + 1)
+        
+        for i in range(num_pairs):
+            output1 = start_output1 + i if start_output1 + i <= end_output1 else None
+            output2 = start_output2 + i if start_output2 + i <= end_output2 else None
+            
+            if output1:
+                bit_pos1 = get_bit_position_in_chain(output1)
+                data_bits1[bit_pos1] = 1
+            
+            if output2:
+                bit_pos2 = get_bit_position_in_chain(output2)
+                data_bits2[bit_pos2] = 1
+            
+            # Shift out data to both chains
+            if chain1 == chain2:
+                # Same chain - combine the data
+                combined_bits = [data_bits1[j] | data_bits2[j] for j in range(OUTPUTS_PER_CHAIN)]
+                shift_out_data(chain1, combined_bits)
+            else:
+                # Different chains
+                shift_out_data(chain1, data_bits1)
+                shift_out_data(chain2, data_bits2)
+            
+            if i < num_pairs - 1:
+                time.sleep(delay / 1000.0)
+        
+        # Hold all outputs on for 1 second
+        time.sleep(1.0)
+        
+        # Turn off all outputs in both runs
+        for i in range(num_pairs):
+            output1 = start_output1 + i if start_output1 + i <= end_output1 else None
+            output2 = start_output2 + i if start_output2 + i <= end_output2 else None
+            
+            if output1:
+                bit_pos1 = get_bit_position_in_chain(output1)
+                data_bits1[bit_pos1] = 0
+            
+            if output2:
+                bit_pos2 = get_bit_position_in_chain(output2)
+                data_bits2[bit_pos2] = 0
+        
+        # Shift out cleared data
+        if chain1 == chain2:
+            combined_bits = [data_bits1[j] | data_bits2[j] for j in range(OUTPUTS_PER_CHAIN)]
+            shift_out_data(chain1, combined_bits)
+        else:
+            shift_out_data(chain1, data_bits1)
+            shift_out_data(chain2, data_bits2)
+    
+    return {"status": "success", "message": f"Cue executed: {cue_type}"}
 
 def main():
-    """Main function"""
-    parser = argparse.ArgumentParser(description="Execute a cue for firework control system")
-    parser.add_argument("--cue", type=int, required=True, help="Cue number")
-    parser.add_argument("--type", type=str, required=True,
-                        help="Cue type (SINGLE SHOT, DOUBLE SHOT, SINGLE RUN, DOUBLE RUN)")
-    parser.add_argument("--outputs", type=str, required=True, help="Comma-separated list of outputs")
-    parser.add_argument("--delay", type=float, default=0.0, help="Delay between outputs in seconds (for RUN types)")
-    parser.add_argument("--json", type=str, help="JSON string with cue data (alternative to individual arguments)")
-
-    args = parser.parse_args()
-
-    # Parse JSON if provided
-    if args.json:
-        try:
-            cue_data = json.loads(args.json)
-            cue_number = cue_data.get("cue_number", 0)
-            cue_type = cue_data.get("cue_type", "")
-            outputs = cue_data.get("output_values", [])
-            delay = cue_data.get("delay", 0.0)
-        except Exception as e:
-            logger.error(f"Error parsing JSON: {e}")
-            sys.exit(1)
-    else:
-        # Use command line arguments
-        cue_number = args.cue
-        cue_type = args.type
-        outputs = parse_outputs(args.outputs)
-        delay = args.delay
-
-    if setup_gpio():
-        success = execute_cue(cue_number, cue_type, outputs, delay)
-        if success:
-            print(f"Cue {cue_number} executed successfully")
-            sys.exit(0)
-        else:
-            print(f"Failed to execute cue {cue_number}")
-            sys.exit(1)
-    else:
-        print("GPIO setup failed")
+    if len(sys.argv) != 2:
+        print(json.dumps({"status": "error", "message": "Usage: execute_cue.py '<cue_json>'"}))
         sys.exit(1)
-
+    
+    try:
+        cue_data = json.loads(sys.argv[1])
+        setup_gpio()
+        result = execute_cue(cue_data)
+        print(json.dumps(result))
+        sys.exit(0)
+        
+    except Exception as e:
+        print(json.dumps({"status": "error", "message": str(e)}))
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()

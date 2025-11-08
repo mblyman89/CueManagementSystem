@@ -21,12 +21,12 @@ import time
 import paramiko
 from dataclasses import dataclass
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, List
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 
 from PySide6.QtCore import QObject, Signal, QTimer
 
-from hardware.shift_register_formatter import ShiftRegisterFormatter, ShiftRegisterConfig, ShiftRegisterPacket
+from views.managers.shift_register_formatter_manager import ShiftRegisterFormatter, ShiftRegisterConfig
 
 
 class HardwareState(Enum):
@@ -73,7 +73,7 @@ class ConnectionConfig:
     password: str
     client_id: str = None
     use_ssl: bool = False
-    base_path: str = "/home/pi/fireworks"
+    base_path: str = "~/fireworks"
     command_script: str = "execute_command.py"
     status_script: str = "get_status.py"
     emergency_script: str = "emergency_stop.py"
@@ -162,7 +162,7 @@ class HardwareController(QObject):
             password=password,
             client_id=f"fireworks_hardware_{int(time.time())}",
             use_ssl=False,  # Default to False, can be enabled when needed
-            base_path="/home/pi/fireworks",
+            base_path="~/fireworks",
             command_script="execute_command.py",
             status_script="get_status.py",
             emergency_script="emergency_stop.py"
@@ -183,9 +183,9 @@ class HardwareController(QObject):
                 outputs_per_chain=200,  # 25 × 8 = 200 outputs per chain
                 use_output_enable=True,
                 use_serial_clear=True,
-                output_enable_pins=[5, 6, 7, 8, 12],  # GPIO pins for OE (HIGH=disabled, LOW=enabled)
-                serial_clear_pins=[13, 16, 19, 20, 26],  # GPIO pins for SRCLR (LOW=disabled, HIGH=enabled)
-                arm_pin=21  # Single arm control pin (LOW=disarmed, HIGH=armed)
+                output_enable_pins=[2, 3, 4, 5, 6],  # GPIO pins for OE (Active LOW: HIGH=disabled, LOW=enabled)
+                serial_clear_pins=[13, 16, 19, 20, 26],  # GPIO pins for SRCLR (Active HIGH: LOW=disabled, HIGH=enabled)
+                arm_pin=21  # Single arm control pin (Active HIGH: LOW=disarmed, HIGH=armed)
             )
             print("✅ Hardware controller configured for 1000 outputs")
         except TypeError:

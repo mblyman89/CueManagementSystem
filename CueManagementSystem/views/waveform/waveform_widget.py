@@ -105,6 +105,10 @@ class WaveformView(QWidget):
         self.offset = 0.0  # Normalized scroll position (0.0-1.0)
         self.current_position = 0.0  # Normalized playback position
 
+        # Playback mode for centered playhead behavior
+        self.playback_mode = False  # When True, playhead stays centered and waveform scrolls
+        self.playhead_center_ratio = 0.5  # Position of playhead in view (0.5 = center)
+
         # Zoom constraints
         self.min_zoom = 0.1
         self.max_zoom = 50.0
@@ -284,7 +288,8 @@ class WaveformView(QWidget):
                 # Handle manual peak refinement mode
                 if self.manual_peak_mode:
                     # First check if clicking on existing manual peak to delete it
-                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(),
+                                                                         content_rect)
                     if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
                         self._delete_manual_peak_at_index(manual_peak_index)
                         return
@@ -300,7 +305,8 @@ class WaveformView(QWidget):
                 # Handle double shot mode
                 elif self.double_shot_mode:
                     # First check if clicking on a detected peak to mark it as double shot
-                    peak_index = self._is_detected_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    peak_index = self._is_detected_peak_at_position(event.position().x(), event.position().y(),
+                                                                    content_rect)
                     if peak_index is not False:  # peak_index will be False if no peak is found
                         # Get the peak's time value to use as a unique identifier
                         peak_time = self.visible_peaks[peak_index].time
@@ -316,7 +322,8 @@ class WaveformView(QWidget):
                         return
 
                     # If not a detected peak, check if it's a manual peak
-                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                    manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(),
+                                                                         content_rect)
                     if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
                         # Get the manual peak's time value
                         manual_peak_time = self.manual_peaks[manual_peak_index].time
@@ -328,7 +335,8 @@ class WaveformView(QWidget):
                         # Toggle double shot status for this manual peak
                         if manual_peak_id in self.double_shot_peaks:
                             self.double_shot_peaks.remove(manual_peak_id)
-                            self.logger.info(f"Removed manual peak at time {manual_peak_time:.3f}s from double shot peaks")
+                            self.logger.info(
+                                f"Removed manual peak at time {manual_peak_time:.3f}s from double shot peaks")
                         else:
                             self.double_shot_peaks.add(manual_peak_id)
                             self.logger.info(f"Added manual peak at time {manual_peak_time:.3f}s to double shot peaks")
@@ -354,7 +362,8 @@ class WaveformView(QWidget):
 
                     if peak_index is not None:
                         # Check if it's a manual peak (for deletion)
-                        manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(), content_rect)
+                        manual_peak_index = self._is_manual_peak_at_position(event.position().x(), event.position().y(),
+                                                                             content_rect)
                         if manual_peak_index is not False:  # manual_peak_index will be False if no peak is found
                             self._delete_manual_peak_at_index(manual_peak_index)
                         else:
@@ -1629,6 +1638,23 @@ class WaveformView(QWidget):
         # Partial updates can leave artifacts during rapid position changes
         self.update()
 
+    def set_playback_mode(self, enabled: bool) -> None:
+        """
+        Enable or disable centered playhead playback mode
+
+        When enabled, the playhead stays centered and the waveform scrolls underneath.
+        When disabled, the playhead moves freely across the screen.
+
+        Args:
+            enabled: True to enable centered playhead mode, False for normal mode
+        """
+        self.playback_mode = enabled
+        self.logger.debug(f"Playback mode set to: {enabled}")
+
+        # If enabling playback mode, immediately center the current position
+        if enabled and self.analyzer:
+            self._update_offset_for_centered_playhead()
+
     def _set_position(self, position: float) -> None:
         """
         Internal method to set position with validation
@@ -1638,33 +1664,60 @@ class WaveformView(QWidget):
         """
         self.current_position = max(0.0, min(1.0, position))
 
-        # Center position in view if outside visible area
-        visible_start = self.offset
-        visible_end = self.offset + (1.0 / self.zoom_factor)
-
-        # Use a smaller margin (0.001 ms) when in playback mode
-        # Convert from milliseconds to normalized units
-        if hasattr(self, 'analyzer') and self.analyzer and self.analyzer.sample_rate:
-            # 0.001 ms = 0.000001 seconds
-            # normalized_value = seconds / total_duration
-            if hasattr(self.analyzer, 'duration') and self.analyzer.duration:
-                margin = 0.000001 / self.analyzer.duration
-            else:
-                # Fallback to the original calculation if duration is not available
-                margin = 0.1 / self.zoom_factor
+        # CENTERED PLAYHEAD MODE: Update offset to keep playhead centered during playback
+        if self.playback_mode:
+            self._update_offset_for_centered_playhead()
         else:
-            # Use original margin when not in playback mode or analyzer not available
+            # NORMAL MODE: Only center if position is outside visible area
+            visible_start = self.offset
+            visible_end = self.offset + (1.0 / self.zoom_factor)
+
+            # Use a smaller margin when not in playback mode
             margin = 0.1 / self.zoom_factor
 
-        if (position < visible_start + margin or
-                position > visible_end - margin):
-            self._center_current_position()
+            if (position < visible_start + margin or
+                    position > visible_end - margin):
+                self._center_current_position()
 
     def _center_current_position(self) -> None:
         """Center the current position in the view"""
         self._set_offset(
             self.current_position - (0.5 / self.zoom_factor)
         )
+
+    def _update_offset_for_centered_playhead(self) -> None:
+        """
+        Update offset to keep playhead centered during playback (GarageBand-style)
+
+        This creates smooth scrolling behavior where:
+        - At the start: playhead moves from left toward center
+        - In the middle: playhead stays centered, waveform scrolls
+        - At the end: playhead moves from center toward right
+        """
+        if not self.analyzer:
+            return
+
+        # Calculate the visible window size in normalized units
+        visible_window = 1.0 / self.zoom_factor
+
+        # Calculate where we want the playhead to appear (center by default)
+        playhead_target_position = self.playhead_center_ratio
+
+        # Calculate the ideal offset to center the playhead
+        ideal_offset = self.current_position - (playhead_target_position * visible_window)
+
+        # Calculate the valid offset range
+        max_offset = max(0.0, 1.0 - visible_window)
+
+        # Clamp offset to valid range
+        # This naturally handles edge cases:
+        # - At start (offset = 0): playhead appears on left and moves toward center
+        # - In middle: playhead stays centered as offset follows position
+        # - At end (offset = max): playhead moves from center toward right
+        new_offset = max(0.0, min(max_offset, ideal_offset))
+
+        # Apply the new offset smoothly
+        self._set_offset(new_offset)
 
     def set_zoom(self, factor: float, animate: bool = False) -> None:
         """
@@ -1945,6 +1998,13 @@ class WaveformView(QWidget):
 
             self.manual_peaks.append(manual_peak)
             self.logger.info(f"Added manual peak at position {sample_position}, amplitude {amplitude:.4f}")
+
+            # DOUBLE SHOT FIX: If double shot mode is enabled, automatically mark this new manual peak as double shot
+            if self.double_shot_mode:
+                manual_peak_id = f"m{manual_peak.time}"
+                self.double_shot_peaks.add(manual_peak_id)
+                self.logger.info(f"Automatically marked new manual peak as double shot (mode enabled)")
+
             self.peak_selection_changed.emit()  # Emit signal to update peak count
 
             # FIX: Use full update to prevent grey artifacts around peaks

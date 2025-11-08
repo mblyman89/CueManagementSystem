@@ -5,6 +5,7 @@ from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QMessageBox, QDialog, QApplication,
                                QStatusBar)
 from PySide6.QtCore import Qt, QMetaObject, Q_ARG, Slot
+from PySide6.QtGui import QShortcut, QKeySequence
 from views.table.cue_table import CueTableView
 from utils.data_utils import get_test_data
 from views.managers.led_panel_manager import LedPanelManager
@@ -14,8 +15,11 @@ from views.dialogs.music_file_dialog import MusicFileDialog
 from views.dialogs.generate_show_dialog import GeneratorPromptDialog
 from views.button_bar.button_bar import ButtonBar
 from views.dialogs.mode_selector_dialog import ModeSelector
+from views.dialogs.pre_show_checklist_dialog import PreShowChecklistDialog
 from controllers.system_mode_controller import SystemMode
 from views.managers.music_manager import MusicManager
+from views.led_panel.preview_timeline_widget import PreviewTimelineWidget
+from views.managers.preview_state_manager import PreviewStateManager
 from views.managers.show_manager import ShowManager
 
 
@@ -38,6 +42,10 @@ class MainWindow(QMainWindow):
         self.gpio_controller = self.system_mode.gpio_controller
         self.show_execution_manager = self.system_mode.show_execution_manager
 
+        # Create preview timeline widget BEFORE init_ui (needed in layout)
+        self.preview_timeline = PreviewTimelineWidget()
+        self.preview_timeline.setVisible(False)  # Hidden by default
+
         # Initialize UI components
         self.init_ui()
 
@@ -48,9 +56,25 @@ class MainWindow(QMainWindow):
         from controllers.show_preview_controller import ShowPreviewController
         self.preview_controller = ShowPreviewController(self.led_panel)
 
+        # Create preview state manager
+        self.preview_state_manager = PreviewStateManager(
+            self.preview_controller,
+            self.music_manager,
+            self.led_panel
+        )
+
         # Connect preview controller signals
         self.preview_controller.preview_started.connect(self.handle_preview_started)
         self.preview_controller.preview_ended.connect(self.handle_preview_ended)
+
+        # Connect preview timeline signals
+        self.preview_timeline.seek_requested.connect(self.handle_timeline_seek)
+        self.preview_timeline.scrubbing_started.connect(self.handle_scrubbing_started)
+        self.preview_timeline.scrubbing_ended.connect(self.handle_scrubbing_ended)
+        self.preview_timeline.play_pause_toggled.connect(self.toggle_preview_playback)
+
+        # Connect preview controller to timeline
+        self.preview_controller.time_updated.connect(self.update_timeline_position)
 
         # Connect SSH connection signals
         self.connect_ssh_signals()
@@ -61,6 +85,9 @@ class MainWindow(QMainWindow):
         # Initialize preview control buttons to disabled state
         self.button_bar.initialize_playback_buttons()
 
+        # Setup keyboard shortcuts
+        self.setup_keyboard_shortcuts()
+
     def init_ui(self):
         # Create central widget and main layout
         central_widget = QWidget()
@@ -69,6 +96,11 @@ class MainWindow(QMainWindow):
         # Create status bar
         self.setStatusBar(QStatusBar())
         self.statusBar().showMessage("Ready")
+
+        # Add watchdog status widget to status bar
+        from views.managers.watchdog_status_widget_manager import WatchdogStatusWidget
+        self.watchdog_status_widget = WatchdogStatusWidget()
+        self.statusBar().addPermanentWidget(self.watchdog_status_widget)
 
         # Main vertical layout
         main_layout = QVBoxLayout(central_widget)
@@ -79,7 +111,10 @@ class MainWindow(QMainWindow):
         self.button_bar = self.create_button_bar()
         main_layout.addWidget(self.button_bar)
 
-        # 2. Lower half with table and LED panel
+        # 2. Preview Timeline (Below button bar, hidden by default)
+        main_layout.addWidget(self.preview_timeline)
+
+        # 3. Lower half with table and LED panel
         lower_half = QWidget()
         lower_layout = QHBoxLayout(lower_half)
         lower_layout.setContentsMargins(0, 0, 0, 0)
@@ -103,7 +138,8 @@ class MainWindow(QMainWindow):
         # Add table to the layout (Right)
         lower_layout.addWidget(self.cue_table, 1)  # 1:1 ratio
 
-        main_layout.addWidget(lower_half)
+        # Add lower_half with stretch factor to fill remaining space
+        main_layout.addWidget(lower_half, 1)
 
         self.cue_table.model.led_panel = self.led_panel
 
@@ -160,6 +196,41 @@ class MainWindow(QMainWindow):
         button_bar.import_show_clicked.connect(self.show_manager.import_show)
         button_bar.export_show_clicked.connect(self.show_manager.export_show)
 
+    def setup_keyboard_shortcuts(self):
+        """Setup keyboard shortcuts for emergency actions"""
+        # Emergency abort shortcut: Ctrl+Shift+E
+        self.abort_shortcut = QShortcut(QKeySequence("Ctrl+Shift+E"), self)
+        self.abort_shortcut.activated.connect(self.handle_emergency_abort_shortcut)
+        print("Emergency abort shortcut registered: Ctrl+Shift+E")
+
+    def handle_emergency_abort_shortcut(self):
+        """Handle emergency abort keyboard shortcut"""
+        print("🚨 Emergency abort triggered via keyboard shortcut (Ctrl+Shift+E)")
+
+        # Check if a show is currently executing
+        current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
+
+        if current_mode == 'hardware':
+            # Check if ABORT button is active (show is running)
+            if hasattr(self, 'button_bar') and "STOP" in self.button_bar.buttons:
+                if self.button_bar.buttons["STOP"].isEnabled():
+                    # Show is running - trigger abort
+                    self.statusBar().showMessage("🛑 EMERGENCY ABORT via keyboard shortcut!", 3000)
+                    self.handle_stop_button()
+                else:
+                    # No show running
+                    self.statusBar().showMessage("No show currently executing", 2000)
+                    print("No show to abort")
+        else:
+            # Simulation mode - stop preview if running
+            if hasattr(self, 'preview_controller'):
+                if hasattr(self.preview_controller, 'is_playing') and self.preview_controller.is_playing:
+                    self.statusBar().showMessage("🛑 EMERGENCY STOP via keyboard shortcut!", 3000)
+                    self.handle_stop_button()
+                else:
+                    self.statusBar().showMessage("No preview currently running", 2000)
+                    print("No preview to stop")
+
     # Mode-aware button routing methods
     # These methods check the current system mode and route button actions accordingly
     # In simulation mode: Actions control the preview functionality
@@ -167,28 +238,34 @@ class MainWindow(QMainWindow):
     def handle_execute_all_button(self):
         """Execute show button - works in both simulation and hardware modes"""
         try:
-            # ALWAYS show the preview on LED panel (simulation functionality)
-            self.preview_show()
-
-            # ALSO send SSH commands if in hardware mode
+            # Check current mode
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
-            if current_mode != 'simulation':
-                # In hardware mode: Also execute via SSH
-                self.execute_show_via_system_mode()
+
+            if current_mode == 'simulation':
+                # SIMULATION MODE: Show LED preview only
+                print("Simulation mode: Starting LED preview")
+                self.preview_show()
             else:
-                print("Simulation mode: Preview only")
+                # HARDWARE MODE: Show safety checklist first
+                print("Hardware mode: Showing pre-show safety checklist")
+                self.show_safety_checklist()
 
         except Exception as e:
             print(f"Execute all button error: {e}")
-            # Always ensure preview works as fallback
-            try:
-                self.preview_show()
-            except:
-                pass
+            import traceback
+            traceback.print_exc()
 
     def handle_stop_button(self):
         """Route stop button based on current mode"""
         try:
+            # ALWAYS stop music first (regardless of mode or errors)
+            if hasattr(self, 'music_manager'):
+                try:
+                    self.music_manager.stop_preview()
+                    print("Music stopped")
+                except Exception as music_error:
+                    print(f"Error stopping music: {music_error}")
+
             current_mode = getattr(self.system_mode, 'current_mode', 'simulation')
             if current_mode == 'simulation':
                 # In simulation mode: Stop preview
@@ -204,14 +281,56 @@ class MainWindow(QMainWindow):
                 else:
                     print("No preview is currently active")
             else:
-                # In hardware mode: Abort execution via system_mode
-                self.system_mode.handle_abort_button()
-                # Also stop preview
-                self.stop_preview()
+                # In hardware mode: Abort execution via system_mode (no preview to stop)
+                print("Hardware mode: Aborting show execution on Pi")
+
+                # NEW: Visual feedback during abort
+                self.statusBar().showMessage("🛑 ABORTING SHOW...", 0)  # 0 = stays until changed
+
+                try:
+                    abort_success = self.system_mode.handle_abort_button()
+
+                    # NEW: Visual feedback after abort
+                    if abort_success:
+                        self.statusBar().showMessage("✅ Show aborted successfully", 5000)
+                    else:
+                        self.statusBar().showMessage("⚠️ Abort completed with warnings - check system status", 8000)
+
+                except Exception as abort_error:
+                    print(f"Error aborting Pi execution: {abort_error}")
+                    self.statusBar().showMessage(f"❌ Abort error: {str(abort_error)}", 8000)
+                    # Continue anyway - music is already stopped
+
+                # Re-enable EXECUTE SHOW button and disable ABORT button (stored as "STOP" key)
+                if hasattr(self, 'button_bar'):
+                    if "STOP" in self.button_bar.buttons:
+                        self.button_bar.buttons["STOP"].set_active(False)
+                        print("ABORT button disabled after stopping")
+                    if "EXECUTE SHOW" in self.button_bar.buttons:
+                        self.button_bar.buttons["EXECUTE SHOW"].set_active(True)
+                        print("EXECUTE SHOW button re-enabled")
+                    # Re-enable EXECUTE CUE button after show stops
+                    if "EXECUTE CUE" in self.button_bar.buttons:
+                        self.button_bar.buttons["EXECUTE CUE"].set_active(True)
+                        print("EXECUTE CUE button re-enabled")
+
+                    # Reset ENABLE and ARM buttons to unselected state (green)
+                    if "ENABLE OUTPUTS" in self.button_bar.buttons:
+                        self.button_bar.buttons["ENABLE OUTPUTS"].set_selected(False)
+                        self.button_bar.buttons["ENABLE OUTPUTS"].setText("ENABLE\n OUTPUTS")
+                        print("ENABLE OUTPUTS button reset to green")
+                    if "ARM OUTPUTS" in self.button_bar.buttons:
+                        self.button_bar.buttons["ARM OUTPUTS"].set_selected(False)
+                        self.button_bar.buttons["ARM OUTPUTS"].setText("ARM\n OUTPUTS")
+                        print("ARM OUTPUTS button reset to green")
         except Exception as e:
             print(f"Stop button error: {e}")
-            # Fallback to simulation mode behavior
-            self.stop_preview()
+            # Ensure music is stopped even if other errors occur
+            if hasattr(self, 'music_manager'):
+                try:
+                    self.music_manager.stop_preview()
+                except:
+                    pass
 
     def handle_pause_button(self):
         """Route pause button based on current mode"""
@@ -225,10 +344,9 @@ class MainWindow(QMainWindow):
                 else:
                     print("No preview is currently playing")
             else:
-                # In hardware mode: Pause execution via system_mode
+                # In hardware mode: Pause execution via system_mode (no preview to pause)
+                print("Hardware mode: Pausing show execution on Pi")
                 self.system_mode.handle_pause_button()
-                # Also pause preview
-                self.pause_preview()
         except Exception as e:
             print(f"Pause button error: {e}")
             # Fallback to simulation mode behavior
@@ -246,10 +364,9 @@ class MainWindow(QMainWindow):
                 else:
                     print("No paused preview to resume")
             else:
-                # In hardware mode: Resume execution via system_mode
+                # In hardware mode: Resume execution via system_mode (no preview to resume)
+                print("Hardware mode: Resuming show execution on Pi")
                 self.system_mode.handle_resume_button()
-                # Also resume preview
-                self.resume_preview()
         except Exception as e:
             print(f"Resume button error: {e}")
             # Fallback to simulation mode behavior
@@ -331,28 +448,216 @@ class MainWindow(QMainWindow):
         """Handle execute cue button (hardware mode only)"""
         try:
             if hasattr(self.system_mode, 'handle_execute_cue_button'):
-                # Get selected cue data
-                selected_cue = {'cue_id': 'manual', 'name': 'Manual Cue'}
-                asyncio.create_task(self.system_mode.handle_execute_cue_button(selected_cue))
+                # Get selected cue from table
+                selected_indexes = self.cue_table.selectionModel().selectedRows()
+
+                if not selected_indexes:
+                    QMessageBox.warning(self, "No Selection", "Please select a cue to execute.")
+                    return
+
+                # Get the first selected row
+                row = selected_indexes[0].row()
+
+                # Get cue data from table model
+                if row < len(self.cue_table.model._data):
+                    cue = self.cue_table.model._data[row]
+
+                    # Cue is a list: [cue_number, cue_type, outputs_str, delay, execute_time]
+                    if isinstance(cue, list) and len(cue) >= 5:
+                        cue_number = cue[0]
+                        cue_type = cue[1]
+                        outputs_str = cue[2]
+                        delay = cue[3]
+                        execute_time = cue[4]
+
+                        # Parse outputs string into list of integers
+                        output_values = self._parse_outputs_string(outputs_str)
+
+                        # Convert execute time to milliseconds
+                        time_ms = self._parse_execute_time_to_ms(execute_time)
+
+                        # Create formatted cue
+                        selected_cue = {
+                            'cue_id': str(cue_number),
+                            'cue_number': cue_number,
+                            'cue_type': cue_type,
+                            'output_values': output_values,
+                            'delay': delay,
+                            'execute_time': execute_time,
+                            'time': time_ms
+                        }
+
+                        asyncio.create_task(self.system_mode.handle_execute_cue_button(selected_cue))
+                    else:
+                        QMessageBox.warning(self, "Invalid Cue", "Selected cue data is invalid.")
+                else:
+                    QMessageBox.warning(self, "Invalid Selection", "Selected row is out of range.")
             else:
                 print("Execute cue: Hardware mode not available")
         except Exception as e:
             print(f"Execute cue error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def show_safety_checklist(self):
+        """Show pre-show safety checklist before execution"""
+        try:
+            # Check if there are any cues to execute
+            if not self.cue_table.model._data:
+                QMessageBox.information(self, "No Cues", "There are no cues to execute. Please add cues first.")
+                return
+
+            # Create and show the safety checklist dialog
+            checklist_dialog = PreShowChecklistDialog(self.system_mode, self)
+
+            # Connect the execute_confirmed signal to execute with selected music and uploaded show file
+            checklist_dialog.execute_confirmed.connect(
+                lambda: self.execute_show_with_checklist_music(
+                    checklist_dialog.selected_music,
+                    checklist_dialog.uploaded_show_file
+                )
+            )
+
+            # Show the dialog (modal)
+            checklist_dialog.exec()
+
+        except Exception as e:
+            print(f"Safety checklist error: {e}")
+            import traceback
+            traceback.print_exc()
+            # If checklist fails, ask user if they want to proceed anyway
+            from PySide6.QtWidgets import QMessageBox
+            reply = QMessageBox.warning(
+                self,
+                "Safety Checklist Error",
+                f"Failed to run safety checklist:\n{str(e)}\n\nDo you want to proceed anyway?",
+                QMessageBox.Yes | QMessageBox.No,
+                QMessageBox.No
+            )
+            if reply == QMessageBox.Yes:
+                self.execute_show_with_checklist_music(None)
+
+    def execute_show_with_checklist_music(self, music_info, uploaded_show_file=None):
+        """Execute show with music selected from checklist (or None) and uploaded show file"""
+        try:
+            # Store the uploaded show file path for use in execution
+            if uploaded_show_file:
+                print(f"Using pre-uploaded show file: {uploaded_show_file}")
+                self.uploaded_show_file = uploaded_show_file
+            else:
+                self.uploaded_show_file = None
+
+            # If music was selected in checklist, use it
+            if music_info:
+                print(f"Executing show with music from checklist: {music_info}")
+                self._start_hardware_execution_with_music(music_info)
+            else:
+                # No music selected - execute without music
+                print("Executing show without music")
+                self._start_hardware_execution_with_music(None)
+
+        except Exception as e:
+            print(f"Show execution error: {e}")
+            import traceback
+            traceback.print_exc()
 
     def execute_show_via_system_mode(self):
-        """Execute complete show via system mode directly"""
+        """Execute complete show via system mode directly (hardware mode)"""
         try:
-            # Get all cues from the table
-            show_cues = self.get_all_cues_for_execution()
+            # Note: This method is deprecated - now using execute_show_with_checklist_music
+            # Kept for backward compatibility
 
-            if show_cues:
-                print(f"Executing show via system mode: {len(show_cues)} cues")
-                asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues))
-            else:
-                print("No cues available for execution")
+            # Import the music selection dialog
+            from views.dialogs.music_selection_dialog import MusicSelectionDialog
+
+            # Show music selection dialog
+            music_dialog = MusicSelectionDialog(self, self.music_manager)
+            music_dialog.music_selected.connect(self._start_hardware_execution_with_music)
+
+            # If dialog is rejected, don't start execution
+            if music_dialog.exec() != QDialog.Accepted:
+                return
 
         except Exception as e:
             print(f"System mode show execution error: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _start_hardware_execution_with_music(self, music_file_info):
+        """
+        Start hardware execution with selected music file using timestamp synchronization
+
+        Args:
+            music_file_info (dict or None): Information about the selected music file,
+                                           or None if no music was selected
+        """
+        try:
+            import time
+
+            # Get all cues from the table
+            show_cues = self.get_all_cues_for_execution()
+
+            if not show_cues:
+                print("No cues available for execution")
+                return
+
+            # Calculate start timestamp (500ms from now for synchronization)
+            start_timestamp = time.time() + 0.5
+            print(f"\n=== SYNCHRONIZED START ===")
+            print(f"Current time: {time.time()}")
+            print(f"Start timestamp: {start_timestamp}")
+            print(f"Delay: 500ms")
+
+            # Prepare status message
+            if music_file_info:
+                music_name = f"{music_file_info['name']}{music_file_info['extension']}"
+                status_message = f"Hardware execution started with music: {music_name}"
+            else:
+                status_message = "Hardware execution started (no music)"
+
+            # Enable ABORT button for hardware execution (stored as "STOP" key)
+            if hasattr(self, 'button_bar'):
+                if "STOP" in self.button_bar.buttons:
+                    self.button_bar.buttons["STOP"].set_active(True)
+                    print("ABORT button enabled for hardware execution")
+                # Disable EXECUTE SHOW button during execution
+                if "EXECUTE SHOW" in self.button_bar.buttons:
+                    self.button_bar.buttons["EXECUTE SHOW"].set_active(False)
+                # Disable EXECUTE CUE button during execution
+                if "EXECUTE CUE" in self.button_bar.buttons:
+                    self.button_bar.buttons["EXECUTE CUE"].set_active(False)
+                    print("EXECUTE CUE button disabled during show execution")
+
+            # Execute show on Pi via SSH with timestamp
+            print(f"Sending show to Pi with start timestamp: {start_timestamp}")
+            asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues, start_timestamp))
+
+            # Wait until start timestamp (synchronized start)
+            print(f"Waiting for start timestamp...")
+            while time.time() < start_timestamp - 0.001:
+                time.sleep(0.001)  # Sleep until close to start time
+
+            # Spin-wait for final precision
+            while time.time() < start_timestamp:
+                pass  # Busy-wait for exact moment
+
+            actual_start = time.time()
+            sync_error = (actual_start - start_timestamp) * 1000
+            print(f"Music starting at: {actual_start}")
+            print(f"Sync error: {sync_error:.3f}ms")
+
+            # Start music NOW (synchronized with Pi)
+            if music_file_info:
+                self.music_manager.preview_music(music_file_info['path'], volume=0.7)
+                print(f"Playing music: {music_file_info['path']}")
+
+            # Update status bar
+            self.statusBar().showMessage(status_message)
+
+        except Exception as e:
+            print(f"Error starting hardware execution with music: {e}")
+            import traceback
+            traceback.print_exc()
 
     def get_all_cues_for_execution(self):
         """Get all cues from the cue table formatted for execution"""
@@ -364,16 +669,32 @@ class MainWindow(QMainWindow):
                 # Format cues for execution
                 formatted_cues = []
                 for i, cue in enumerate(cues_data):
-                    formatted_cue = {
-                        'cue_number': i + 1,
-                        'cue_id': cue.get('cue_id', f'cue_{i + 1}'),
-                        'name': cue.get('name', f'Cue {i + 1}'),
-                        'outputs': cue.get('outputs', []),
-                        'duration_ms': cue.get('duration_ms', 1000),
-                        'delay_ms': cue.get('delay_ms', 0),
-                        'description': cue.get('description', '')
-                    }
-                    formatted_cues.append(formatted_cue)
+                    # Cue is a list: [cue_number, cue_type, outputs_str, delay, execute_time]
+                    if isinstance(cue, list) and len(cue) >= 5:
+                        cue_number = cue[0]
+                        cue_type = cue[1]
+                        outputs_str = cue[2]
+                        delay = cue[3]
+                        execute_time = cue[4]
+
+                        # Parse outputs string into list of integers
+                        output_values = self._parse_outputs_string(outputs_str)
+
+                        # Convert execute time to milliseconds
+                        time_ms = self._parse_execute_time_to_ms(execute_time)
+
+                        # Create formatted cue with all necessary fields
+                        formatted_cue = {
+                            'cue_id': str(cue_number),  # Required by system_mode_controller
+                            'cue_number': cue_number,
+                            'cue_type': cue_type,
+                            'output_values': output_values,
+                            'delay': delay,
+                            'execute_time': execute_time,
+                            'time': time_ms  # In milliseconds for Pi
+                        }
+
+                        formatted_cues.append(formatted_cue)
 
                 return formatted_cues
             else:
@@ -382,7 +703,47 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             print(f"Error getting cues for execution: {e}")
+            import traceback
+            traceback.print_exc()
             return []
+
+    def _parse_outputs_string(self, outputs_str):
+        """Parse outputs string into list of integers"""
+        if not outputs_str:
+            return []
+
+        # Remove spaces and split by comma
+        outputs_str = str(outputs_str).replace(' ', '')
+        parts = outputs_str.split(',')
+
+        output_values = []
+        for part in parts:
+            try:
+                output_values.append(int(part))
+            except ValueError:
+                continue
+
+        return output_values
+
+    def _parse_execute_time_to_ms(self, execute_time):
+        """Convert execute time string to milliseconds"""
+        try:
+            if isinstance(execute_time, (int, float)):
+                return int(execute_time * 1000)
+
+            if isinstance(execute_time, str) and ':' in execute_time:
+                # Format: MM:SS.SSSS
+                parts = execute_time.split(':')
+                if len(parts) == 2:
+                    minutes = int(parts[0])
+                    seconds = float(parts[1])
+                    total_seconds = minutes * 60 + seconds
+                    return int(total_seconds * 1000)
+
+            return 0
+        except Exception as e:
+            print(f"Error parsing execute time: {e}")
+            return 0
 
     def connect_ssh_signals(self):
         """Connect SSH connection signals to UI updates"""
@@ -406,6 +767,11 @@ class MainWindow(QMainWindow):
                 if hasattr(self.show_execution_manager, 'show_resumed'):  # Correct signal name
                     self.show_execution_manager.show_resumed.connect(self.handle_execution_resumed)
 
+                # Connect watchdog signals if available
+                if hasattr(self.show_execution_manager, 'watchdog') and self.show_execution_manager.watchdog:
+                    self.show_execution_manager.watchdog.health_check_completed.connect(self.update_watchdog_status)
+                    self.show_execution_manager.watchdog.status_changed.connect(self.handle_watchdog_status_change)
+
             # Connect GPIO controller signals (use correct signal names)
             if hasattr(self, 'gpio_controller') and self.gpio_controller:
                 if hasattr(self.gpio_controller, 'gpio_state_changed'):  # Correct signal name
@@ -420,24 +786,36 @@ class MainWindow(QMainWindow):
     def update_connection_status(self, connected: bool, status_message: str):
         """Update UI based on SSH connection status"""
         if connected:
-            self.statusBar().showMessage(f"SSH Connected: {status_message}")
-            self.statusBar().setStyleSheet("background-color: #2ecc71; color: white;")
+            self.statusBar().showMessage(f"✅ SSH Connected: {status_message}", 3000)
+            # Reset status bar style to not cover watchdog widget
+            self.statusBar().setStyleSheet("")
         else:
-            self.statusBar().showMessage(f"SSH Disconnected: {status_message}")
-            self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+            self.statusBar().showMessage(f"❌ SSH Disconnected: {status_message}", 5000)
+            # Reset status bar style to not cover watchdog widget
+            self.statusBar().setStyleSheet("")
 
     def handle_ssh_error(self, error_message: str):
         """Handle SSH errors"""
-        self.statusBar().showMessage(f"SSH Error: {error_message}")
-        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+        self.statusBar().showMessage(f"❌ SSH Error: {error_message}", 5000)
+        self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
 
     def update_hardware_status(self, status_data: dict):
         """Update hardware status display"""
         # Update status bar with hardware info
         if 'outputs_enabled' in status_data:
-            enabled_count = sum(status_data['outputs_enabled'])
-            total_count = len(status_data['outputs_enabled'])
-            self.statusBar().showMessage(f"Hardware: {enabled_count}/{total_count} outputs enabled")
+            # Handle both boolean and list formats
+            outputs_enabled = status_data['outputs_enabled']
+            if isinstance(outputs_enabled, bool):
+                # Boolean format: just show enabled/disabled
+                status_text = "Hardware: Outputs " + ("ENABLED" if outputs_enabled else "DISABLED")
+                self.statusBar().showMessage(status_text)
+            elif isinstance(outputs_enabled, list):
+                # List format: count enabled outputs
+                enabled_count = sum(outputs_enabled)
+                total_count = len(outputs_enabled)
+                self.statusBar().showMessage(f"Hardware: {enabled_count}/{total_count} outputs enabled")
+            else:
+                self.statusBar().showMessage("Hardware: Status unknown")
 
     def update_button_state(self, button_name: str, enabled: bool):
         """Update button enabled/disabled state"""
@@ -461,18 +839,18 @@ class MainWindow(QMainWindow):
 
     def handle_show_completed(self):
         """Handle show completion"""
-        self.statusBar().showMessage("Show execution completed")
-        self.statusBar().setStyleSheet("background-color: #2ecc71; color: white;")
+        self.statusBar().showMessage("✅ Show execution completed", 5000)
+        self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
 
     def handle_execution_paused(self):
         """Handle show execution pause"""
-        self.statusBar().showMessage("Show execution paused")
-        self.statusBar().setStyleSheet("background-color: #f39c12; color: white;")
+        self.statusBar().showMessage("⏸️ Show execution paused", 3000)
+        self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
 
     def handle_execution_resumed(self):
         """Handle show execution resume"""
-        self.statusBar().showMessage("Show execution resumed")
-        self.statusBar().setStyleSheet("background-color: #3498db; color: white;")
+        self.statusBar().showMessage("▶️ Show execution resumed", 3000)
+        self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
 
     def handle_gpio_state_changed(self, pin: int, state: bool):
         """Handle GPIO pin state changes"""
@@ -480,8 +858,8 @@ class MainWindow(QMainWindow):
 
     def handle_gpio_error(self, error_message: str):
         """Handle GPIO errors"""
-        self.statusBar().showMessage(f"GPIO Error: {error_message}")
-        self.statusBar().setStyleSheet("background-color: #e74c3c; color: white;")
+        self.statusBar().showMessage(f"❌ GPIO Error: {error_message}", 5000)
+        self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
 
     def load_test_data(self):
         """Load sample data into both table and LED panel for testing"""
@@ -1249,6 +1627,22 @@ class MainWindow(QMainWindow):
 
             # Start the preview
             if self.preview_controller.start_preview():
+                # Show and initialize timeline
+                self.preview_timeline.setVisible(True)
+                self.preview_timeline.enable_controls(True)
+
+                # Get music duration
+                if music_file_info:
+                    duration_ms = self.music_manager.player.duration()
+                    duration_sec = duration_ms / 1000.0 if duration_ms > 0 else 0.0
+                else:
+                    # Use show duration if no music
+                    duration_sec = self.preview_controller.get_total_duration()
+
+                # Initialize timeline with duration
+                self.preview_timeline.update_position(0.0, duration_sec)
+                self.preview_timeline.set_playing_state(True)
+
                 # Update UI to reflect preview state
                 self.statusBar().showMessage(status_message)
             else:
@@ -1319,6 +1713,9 @@ class MainWindow(QMainWindow):
             self.button_bar.handle_preview_paused()
             self.button_bar.update_playback_button_states()
 
+            # Update timeline state
+            self.preview_timeline.set_playing_state(False)
+
             # Update status bar
             self.statusBar().showMessage("Show preview paused")
 
@@ -1352,6 +1749,9 @@ class MainWindow(QMainWindow):
             self.button_bar.handle_preview_resumed()
             self.button_bar.update_playback_button_states()
 
+            # Update timeline state
+            self.preview_timeline.set_playing_state(True)
+
             # Update status bar
             self.statusBar().showMessage("Show preview resumed")
 
@@ -1381,6 +1781,11 @@ class MainWindow(QMainWindow):
 
         # Stop any playing music
         self.music_manager.stop_preview()
+
+        # Hide and disable timeline
+        self.preview_timeline.setVisible(False)
+        self.preview_timeline.enable_controls(False)
+        self.preview_timeline.set_playing_state(False)
 
         # Update status bar
         self.statusBar().showMessage("Show preview completed")
@@ -1412,6 +1817,16 @@ class MainWindow(QMainWindow):
         try:
             print("Application closing - starting cleanup")
 
+            # Cleanup show execution manager (includes watchdog)
+            if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
+                print("Cleaning up show execution manager")
+                self.show_execution_manager.cleanup()
+
+            # Cleanup watchdog status widget
+            if hasattr(self, 'watchdog_status_widget') and self.watchdog_status_widget:
+                print("Cleaning up watchdog status widget")
+                self.watchdog_status_widget.cleanup()
+
             # Perform synchronous cleanup to avoid event loop issues
             if self.system_mode:
                 self.system_mode.close_connection_sync()
@@ -1429,3 +1844,80 @@ class MainWindow(QMainWindow):
                 await self.system_mode.close_connection()
         except Exception as e:
             print(f"Error in cleanup: {e}")
+
+    # ============================================================================
+    # PREVIEW TIMELINE HANDLERS
+    # ============================================================================
+
+    def handle_timeline_seek(self, time: float):
+        """
+        Handle seek request from timeline (during scrubbing)
+
+        Args:
+            time: Target time in seconds
+        """
+        if self.preview_state_manager.is_scrubbing:
+            self.preview_state_manager.update_scrubbing_position(time)
+
+    def handle_scrubbing_started(self):
+        """Handle start of timeline scrubbing"""
+        self.preview_state_manager.start_scrubbing()
+
+    def handle_scrubbing_ended(self):
+        """Handle end of timeline scrubbing"""
+        final_time = self.preview_timeline.get_current_position()
+        self.preview_state_manager.end_scrubbing(final_time)
+
+    def update_timeline_position(self, time: float):
+        """
+        Update timeline position from preview controller
+
+        Args:
+            time: Current time in seconds
+        """
+        if not self.preview_state_manager.is_scrubbing:
+            duration = self.preview_controller.get_total_duration()
+
+            # Use music duration if available and longer
+            if self.music_manager.player.duration() > 0:
+                music_duration = self.music_manager.player.duration() / 1000.0
+                duration = max(duration, music_duration)
+
+            self.preview_timeline.update_position(time, duration)
+
+    def toggle_preview_playback(self):
+        """Toggle play/pause from timeline widget"""
+        if self.preview_controller.is_playing:
+            self.pause_preview()
+        elif self.preview_controller.is_paused:
+            self.resume_preview()
+
+    def update_watchdog_status(self, success: bool, latency_ms: float):
+        """
+        Update watchdog status display.
+
+        Args:
+            success: Whether the health check succeeded
+            latency_ms: Latency of the health check in milliseconds
+        """
+        if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
+            status = self.show_execution_manager.get_watchdog_status()
+            if status and hasattr(self, 'watchdog_status_widget'):
+                self.watchdog_status_widget.update_status(status)
+
+    def handle_watchdog_status_change(self, status: str):
+        """
+        Handle watchdog status change.
+
+        Args:
+            status: New status ("active", "inactive", "triggered", "paused")
+        """
+        if status == "triggered":
+            self.statusBar().showMessage("🛑 WATCHDOG TRIGGERED - Connection lost!", 10000)
+            self.statusBar().setStyleSheet("")  # Reset to default - don't cover watchdog widget
+        elif status == "active":
+            if hasattr(self, 'watchdog_status_widget'):
+                self.watchdog_status_widget.set_monitoring(True)
+        elif status == "inactive":
+            if hasattr(self, 'watchdog_status_widget'):
+                self.watchdog_status_widget.set_monitoring(False)
