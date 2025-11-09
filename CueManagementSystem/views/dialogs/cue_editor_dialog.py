@@ -543,7 +543,11 @@ class CueEditorDialog(QDialog):
                     try:
                         # output_spinboxes contains tuples of (label, spinbox)
                         _, spinbox = self.output_spinboxes[i]
-                        spinbox.setValue(int(value) if value.is_integer() else value)
+                        # Convert to int for spinbox
+                        if isinstance(value, float):
+                            spinbox.setValue(int(value) if value.is_integer() else int(value))
+                        else:
+                            spinbox.setValue(int(value))
                     except (ValueError, TypeError, AttributeError) as e:
                         print(f"Could not set output value: {value} - {str(e)}")
 
