@@ -20,7 +20,7 @@ class WelcomePage(QWidget):
         self.setWindowTitle("CUE MANAGEMENT SYSTEM")
 
         # Store the background image path - use the path provided by the user
-        self.background_image_path = "/Users/michaellyman/Desktop/Cue Management System/CuePiShifter_logo.PNG"
+        self.background_image_path = "/Users/michaellyman/Desktop/Cue Management System/APP FILES/CueManagementSystem/CueManagementSystem/images/CuePiShifter_logo.PNG"
 
         # Alternative paths to try if the main path doesn't work
         self.alternative_paths = [
