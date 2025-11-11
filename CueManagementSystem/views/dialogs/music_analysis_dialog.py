@@ -59,7 +59,7 @@ class MusicAnalysisDialog(QDialog):
 
     def __init__(self, parent=None, led_panel=None, cue_table=None):
         super().__init__(parent)
-        self.setWindowTitle("Music Analysis with Audio Separation")
+        self.setWindowTitle("Music Analysis with Drum Separation")
         self.setMinimumWidth(700)
         self.setMinimumHeight(781)
 

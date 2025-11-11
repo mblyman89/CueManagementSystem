@@ -10,8 +10,11 @@ class MusicSelectionDialog(QDialog):
 
     music_selected = Signal(dict)  # Signal emitted when music is selected
 
-    def __init__(self, parent=None, music_manager=None):
+    def __init__(self, parent=None, music_manager=None, is_hardware_mode=False):
         super().__init__(parent)
+
+        # Store mode for UI updates
+        self.is_hardware_mode = is_hardware_mode
 
         # Use the provided music manager or create a new one
         if music_manager is not None and isinstance(music_manager, MusicManager):
@@ -22,16 +25,23 @@ class MusicSelectionDialog(QDialog):
         self._init_ui()
         self._refresh_music_list()
 
-        # Set dialog properties
-        self.setWindowTitle("Select Music for Preview")
+        # Set dialog properties based on mode
+        if self.is_hardware_mode:
+            self.setWindowTitle("Select Music for Show")
+        else:
+            self.setWindowTitle("Select Music for Preview")
         self.resize(500, 400)
 
     def _init_ui(self):
         # Main layout
         main_layout = QVBoxLayout(self)
 
-        # Header
-        header_label = QLabel("Select Music File to Play with Preview")
+        # Header - dynamic based on mode
+        if self.is_hardware_mode:
+            header_text = "Select Music File to Play with Show"
+        else:
+            header_text = "Select Music File to Play with Preview"
+        header_label = QLabel(header_text)
         header_label.setFont(QFont("Arial", 12, QFont.Bold))
         main_layout.addWidget(header_label)
 
@@ -42,7 +52,12 @@ class MusicSelectionDialog(QDialog):
         main_layout.addWidget(self.music_list)
 
         # No music option
-        no_music_label = QLabel("No music? Just click 'Skip Music' to preview without audio.")
+        # Dynamic text based on mode
+        if self.is_hardware_mode:
+            no_music_text = "No music? Just click 'Skip Music' to execute show without audio."
+        else:
+            no_music_text = "No music? Just click 'Skip Music' to preview without audio."
+        no_music_label = QLabel(no_music_text)
         no_music_label.setAlignment(Qt.AlignCenter)
         main_layout.addWidget(no_music_label)
 

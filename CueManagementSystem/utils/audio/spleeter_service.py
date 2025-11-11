@@ -206,7 +206,7 @@ class SpleeterService(QObject):
             'cache_separations': True,
             'max_cache_size_mb': 1000,
             'temp_cleanup': True,
-            'spleeter_command': os.environ.get('CUE_SPLEETER_PATH') or 'spleeter'
+            'spleeter_command': '/Users/michaellyman/.venvs/cueaudio/bin/spleeter'
         }
         
     def _resolve_spleeter_cmd(self) -> str:
@@ -218,7 +218,7 @@ class SpleeterService(QObject):
             resolved = _shutil.which(cmd)
             return resolved or cmd
         except Exception:
-            return self.config.get('spleeter_command') or 'spleeter'
+            return self.config.get('spleeter_command') or '/Users/michaellyman/.venvs/cueaudio/bin/spleeter'
         
     def check_spleeter_availability(self) -> Tuple[bool, str]:
         """

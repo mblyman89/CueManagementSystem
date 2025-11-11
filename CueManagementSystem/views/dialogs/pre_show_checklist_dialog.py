@@ -585,8 +585,8 @@ class PreShowChecklistDialog(QDialog):
                                     "Cannot select music - music manager not found.")
                 return
 
-            # Show music selection dialog
-            music_dialog = MusicSelectionDialog(self.parent(), self.parent().music_manager)
+            # Show music selection dialog (hardware mode - from checklist)
+            music_dialog = MusicSelectionDialog(self.parent(), self.parent().music_manager, is_hardware_mode=True)
 
             # Connect signal to capture the selection
             def capture_music(music_info):
@@ -719,9 +719,9 @@ class PreShowChecklistDialog(QDialog):
 
             print(f"[Upload] JSON size: {len(show_json)} bytes")
 
-            # Create show filename with timestamp
-            timestamp = int(time.time())
-            show_file = f"~/show_{timestamp}.json"
+            # Use fixed filename for pre-uploaded show
+            # This matches what execute_show expects
+            show_file = "/tmp/show_data.json"
 
             # Get connection settings
             connection_settings = system_mode.connection_settings

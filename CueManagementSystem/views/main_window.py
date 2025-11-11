@@ -570,8 +570,8 @@ class MainWindow(QMainWindow):
             # Import the music selection dialog
             from views.dialogs.music_selection_dialog import MusicSelectionDialog
 
-            # Show music selection dialog
-            music_dialog = MusicSelectionDialog(self, self.music_manager)
+            # Show music selection dialog (hardware mode)
+            music_dialog = MusicSelectionDialog(self, self.music_manager, is_hardware_mode=True)
             music_dialog.music_selected.connect(self._start_hardware_execution_with_music)
 
             # If dialog is rejected, don't start execution
@@ -601,12 +601,25 @@ class MainWindow(QMainWindow):
                 print("No cues available for execution")
                 return
 
-            # Calculate start timestamp (500ms from now for synchronization)
-            start_timestamp = time.time() + 0.5
+            # PRE-LOAD music file to reduce startup latency
+            if music_file_info:
+                print(f"Pre-loading music file: {music_file_info['path']}")
+                # Load the file but don't play yet
+                from PySide6.QtCore import QUrl
+                self.music_manager.player.setSource(QUrl.fromLocalFile(music_file_info['path']))
+                self.music_manager.audio_output.setVolume(0.7)
+                # Wait a moment for file to load
+                time.sleep(0.05)  # 50ms for file loading
+                print("Music file pre-loaded")
+
+            # Calculate INITIAL timestamp for Pi script startup
+            # This is just a placeholder - the REAL timestamp will be calculated after Pi signals READY
+            # Using 10 seconds to give Pi plenty of time to initialize and signal ready
+            start_timestamp = time.time() + 10.0
             print(f"\n=== SYNCHRONIZED START ===")
             print(f"Current time: {time.time()}")
             print(f"Start timestamp: {start_timestamp}")
-            print(f"Delay: 500ms")
+            print(f"Initial timestamp: {start_timestamp} (placeholder - real sync happens after Pi signals READY)")
 
             # Prepare status message
             if music_file_info:
@@ -648,8 +661,9 @@ class MainWindow(QMainWindow):
 
             # Start music NOW (synchronized with Pi)
             if music_file_info:
-                self.music_manager.preview_music(music_file_info['path'], volume=0.7)
-                print(f"Playing music: {music_file_info['path']}")
+                # File is already pre-loaded, just call play() for instant start
+                self.music_manager.player.play()
+                print(f"Playing music: {music_file_info['path']} (pre-loaded)")
 
             # Update status bar
             self.statusBar().showMessage(status_message)
@@ -1586,8 +1600,8 @@ class MainWindow(QMainWindow):
             # Import the music selection dialog
             from views.dialogs.music_selection_dialog import MusicSelectionDialog
 
-            # Show music selection dialog with the existing music manager
-            music_dialog = MusicSelectionDialog(self, self.music_manager)
+            # Show music selection dialog with the existing music manager (preview mode)
+            music_dialog = MusicSelectionDialog(self, self.music_manager, is_hardware_mode=False)
             music_dialog.music_selected.connect(self._start_preview_with_music)
 
             # If dialog is rejected, don't start the preview
@@ -1816,16 +1830,6 @@ class MainWindow(QMainWindow):
         """Handle application closing"""
         try:
             print("Application closing - starting cleanup")
-
-            # Cleanup show execution manager (includes watchdog)
-            if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
-                print("Cleaning up show execution manager")
-                self.show_execution_manager.cleanup()
-
-            # Cleanup watchdog status widget
-            if hasattr(self, 'watchdog_status_widget') and self.watchdog_status_widget:
-                print("Cleaning up watchdog status widget")
-                self.watchdog_status_widget.cleanup()
 
             # Perform synchronous cleanup to avoid event loop issues
             if self.system_mode:

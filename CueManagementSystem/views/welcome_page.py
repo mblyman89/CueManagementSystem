@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QPushButton, QVBoxLayout, QHBoxLayout,
                                QLabel, QSizePolicy, QSpacerItem, QFileDialog,
                                QMenu)
@@ -19,15 +20,43 @@ class WelcomePage(QWidget):
         super().__init__(parent)
         self.setWindowTitle("CUE MANAGEMENT SYSTEM")
 
-        # Store the background image path - use the path provided by the user
-        self.background_image_path = "/Users/michaellyman/Desktop/Cue Management System/APP FILES/CueManagementSystem/CueManagementSystem/images/CuePiShifter_logo.PNG"
+        # Resolve background image relative to project images directory
+        images_dir = Path(__file__).resolve().parent.parent / "images"
 
-        # Alternative paths to try if the main path doesn't work
-        self.alternative_paths = [
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "CuePiShifter_logo.PNG"),
-            os.path.join(os.path.dirname(os.path.dirname(__file__)), "2346c7df-c3e1-4768-b057-f8a411f19c1e_0.PNG"),
-            # Add more potential paths if needed
+        # Try preferred filenames (case variations) first
+        preferred_names = [
+            "CuePiShifter_logo.png",
+            "CuePiShifter_logo.PNG",
+            "cuepishifter_logo.png",
+            "cuepishifter_logo.PNG",
         ]
+
+        found_path = None
+        for name in preferred_names:
+            candidate = images_dir / name
+            if candidate.exists():
+                found_path = candidate
+                break
+
+        # If not found, try any png/jpg in images folder that looks like a logo/background
+        if not found_path and images_dir.exists():
+            for p in images_dir.iterdir():
+                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".bmp"}:
+                    if "logo" in p.name.lower() or "background" in p.name.lower():
+                        found_path = p
+                        break
+
+        # Set the background path (string) if found; leave empty to trigger fallback logic
+        self.background_image_path = str(found_path) if found_path else ""
+
+        # Alternative paths to try if the main path doesn't work (search other images in the images folder)
+        self.alternative_paths = []
+        if images_dir.exists():
+            for p in images_dir.iterdir():
+                if p.is_file() and p.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".bmp"}:
+                    # Avoid duplicating the found_path
+                    if str(p) != self.background_image_path:
+                        self.alternative_paths.append(str(p))
 
         # Set up the background image
         self.setup_background()

@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushB
                                QDoubleSpinBox, QScrollArea, QFrame, QRadioButton, QButtonGroup,
                                QTextEdit, QSizePolicy)
 from PySide6.QtCore import Qt, Signal
-from CueManagementSystem.utils.show_enums import ShowStyle, RhythmPattern, ComplexityLevel
+from utils.show_enums import ShowStyle, RhythmPattern, ComplexityLevel
 
 
 class ShowConfigData:

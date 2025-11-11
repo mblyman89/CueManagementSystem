@@ -846,69 +846,131 @@ class SystemMode(QObject):
 
                 # If in hardware mode, send SSH command to Pi
                 if self.is_hardware_mode():
-                    print("SystemMode: In hardware mode, creating fresh SSH connection for show execution")
-
-                    # Create fresh SSH connection
                     import paramiko
-                    ssh = paramiko.SSHClient()
-                    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                    # Try to reuse existing SSH connection if available
+                    ssh = None
+                    if self.ssh_connection:
+                        try:
+                            # Test if connection is still alive
+                            transport = self.ssh_connection.get_transport()
+                            if transport and transport.is_active():
+                                print("SystemMode: Reusing existing SSH connection for show execution")
+                                ssh = self.ssh_connection
+                            else:
+                                print("SystemMode: Existing SSH connection is dead, creating new one")
+                        except:
+                            print("SystemMode: Error checking SSH connection, creating new one")
+                    else:
+                        print("SystemMode: No existing SSH connection, creating new one")
+
+                    # Create fresh connection if needed
+                    if ssh is None:
+                        ssh = paramiko.SSHClient()
+                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+
+                        try:
+                            # Connect using stored settings
+                            print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
+                            ssh.connect(
+                                hostname=self.connection_settings['host'],
+                                port=self.connection_settings.get('port', 22),
+                                username=self.connection_settings['username'],
+                                password=self.connection_settings.get('password', ''),
+                                timeout=10
+                            )
+                            print("SystemMode: SSH connection established")
+                        except Exception as conn_error:
+                            print(f"SystemMode: Failed to establish SSH connection: {conn_error}")
+                            self.error_occurred.emit(f"SSH connection failed: {str(conn_error)}")
+                            return False
 
                     try:
-                        # Connect using stored settings
-                        print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
-                        ssh.connect(
-                            hostname=self.connection_settings['host'],
-                            port=self.connection_settings.get('port', 22),
-                            username=self.connection_settings['username'],
-                            password=self.connection_settings.get('password', ''),
-                            timeout=10
-                        )
-                        print("SystemMode: SSH connection established")
 
-                        # Normalize all cues for Pi
-                        normalized_cues = [self.normalize_cue_for_pi(cue) for cue in show_cues]
+                        # Use the pre-uploaded show file from checklist
+                        # This avoids re-uploading during the critical synchronization window
+                        temp_file = "/tmp/show_data.json"
+                        print(f"SystemMode: Using pre-uploaded show file: {temp_file}")
+                        # Verify file exists on Pi
+                        stdin, stdout, stderr = ssh.exec_command(f"test -f {temp_file} && echo 'exists'")
+                        file_check = stdout.read().decode().strip()
 
-                        # Convert show data to JSON string
-                        import json
-                        show_json = json.dumps({"cues": normalized_cues})
+                        if file_check == 'exists':
+                            print("SystemMode: Pre-uploaded show file verified on Pi")
 
-                        # Create a temporary file on the Pi to store the show data
-                        temp_file = f"~/show_{int(time.time())}.json"
-                        create_file_cmd = f"echo '{show_json}' > {temp_file}"
-                        print(f"SystemMode: Creating show file: {temp_file}")
+                            # TWO-WAY HANDSHAKE: Start script and wait for READY signal
+                            # This ensures Pi is fully initialized before we calculate final timestamp
+                            print("SystemMode: Starting two-way handshake synchronization...")
 
-                        # Execute command to create the file
-                        stdin, stdout, stderr = ssh.exec_command(create_file_cmd)
-                        exit_status = stdout.channel.recv_exit_status()
-
-                        if exit_status == 0:
-                            # Build command to execute the show with optional timestamp
+                            # Build command WITHOUT background (&) so we can communicate via stdin/stdout
                             if start_timestamp:
-                                command = f"python3 ~/execute_show.py {temp_file} {start_timestamp} &"
-                                print(f"SystemMode: Executing command with timestamp: {command}")
-                                print(f"SystemMode: Start timestamp: {start_timestamp}")
-                                print(f"SystemMode: Current time: {time.time()}")
-                                print(f"SystemMode: Delay: {(start_timestamp - time.time()) * 1000:.1f}ms")
+                                command = f"python3 ~/execute_show.py {temp_file} {start_timestamp} 2>/tmp/show_execution.log"
                             else:
-                                command = f"python3 ~/execute_show.py {temp_file} &"
-                                print(f"SystemMode: Executing command: {command}")
+                                command = f"python3 ~/execute_show.py {temp_file} 2>/tmp/show_execution.log"
 
-                            # Execute command to start the show
+                            print(f"SystemMode: Executing command: {command}")
+
+                            # Execute command (NOT in background - we need stdin/stdout)
                             stdin, stdout, stderr = ssh.exec_command(command)
 
-                            self.logger.info(f"Show execution started via SSH")
-                            print("SystemMode: Show execution started on Pi")
-                            success = True
+                            # WAIT FOR READY SIGNAL from Pi
+                            print("SystemMode: Waiting for READY signal from Pi...")
+                            import select
+                            ready_timeout = 10  # 10 seconds max wait for ready
+                            start_wait = time.time()
+
+                            ready_received = False
+                            while time.time() - start_wait < ready_timeout:
+                                # Check if stdout has data
+                                if stdout.channel.recv_ready():
+                                    line = stdout.readline().strip()
+                                    print(f"SystemMode: Received from Pi: {line}")
+
+                                    try:
+                                        import json
+                                        data = json.loads(line)
+                                        if data.get('status') == 'ready':
+                                            print("SystemMode: ✓ Pi is READY!")
+                                            ready_received = True
+                                            break
+                                    except:
+                                        pass  # Not JSON, keep waiting
+
+                                time.sleep(0.01)  # Small delay to avoid busy-wait
+
+                            if not ready_received:
+                                print("SystemMode: ERROR - Pi did not signal READY in time!")
+                                self.error_occurred.emit("Pi did not signal ready in time")
+                                success = False
+                            else:
+                                # Pi is ready! Calculate final timestamp with short buffer
+                                final_timestamp = time.time() + 0.5  # 500ms buffer (Pi is already ready!)
+                                print(f"SystemMode: Sending GO signal with timestamp: {final_timestamp}")
+                                print(f"SystemMode: Current time: {time.time()}")
+                                print(f"SystemMode: Delay: 500ms (Pi is already initialized)")
+
+                                # SEND GO SIGNAL to Pi
+                                stdin.write(f"{final_timestamp}\n")
+                                stdin.flush()
+                                print("SystemMode: ✓ GO signal sent!")
+
+                                self.logger.info(f"Show execution started via two-way handshake")
+                                print("SystemMode: Show execution started on Pi with perfect sync")
+                                success = True
                         else:
-                            error = stderr.read().decode().strip()
-                            self.logger.error(f"Failed to create show file on Pi: {error}")
-                            print(f"SystemMode: Failed to create show file: {error}")
-                            self.error_occurred.emit(f"Hardware show execution failed: {error}")
+                            self.logger.error(f"Pre-uploaded show file not found on Pi: {temp_file}")
+                            print(f"SystemMode: ERROR - Show file not found: {temp_file}")
+                            print("SystemMode: Please upload show data using the Pre-Show Checklist first!")
+                            self.error_occurred.emit(
+                                f"Show file not found. Upload show data first using Pre-Show Checklist.")
                             success = False
 
-                        # Close the connection
-                        ssh.close()
-                        print("SystemMode: SSH connection closed")
+                        # Only close if we created a new connection (not reusing existing)
+                        if ssh != self.ssh_connection:
+                            ssh.close()
+                            print("SystemMode: SSH connection closed")
+                        else:
+                            print("SystemMode: Keeping SSH connection alive for future use")
 
                     except Exception as ssh_e:
                         self.logger.error(f"SSH show execution error: {ssh_e}")
@@ -916,9 +978,10 @@ class SystemMode(QObject):
                         self.error_occurred.emit(f"SSH show execution error: {str(ssh_e)}")
                         success = False
 
-                        # Try to close connection if it was opened
+                        # Try to close connection if it was opened (only if not reusing)
                         try:
-                            ssh.close()
+                            if ssh and ssh != self.ssh_connection:
+                                ssh.close()
                         except:
                             pass
 
@@ -1394,23 +1457,23 @@ class SystemMode(QObject):
                     self.logger.info("Switching to WiFi mode...")
                     self.message_received.emit("network_status", "Switching to WiFi mode...")
 
-                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=wifi &amp;"
+                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=wifi"
                     stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
+                    exit_status = stdout.channel.recv_exit_status()
 
-                    # Don't wait for exit status - the connection will drop during network switch
-                    # Just assume success if command was sent
-                    self.logger.info("WiFi mode switch command sent - connection will drop during switch")
-                    self.message_received.emit("network_status",
-                                               "WiFi mode switch initiated - SSH connection will drop. Reconnect to Pi on Lyman network.")
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"WiFi mode switch successful: {output}")
+                        self.message_received.emit("network_status", "Successfully switched to WiFi mode")
 
-                    # Close the SSH connection since it will be invalid after network switch
-                    try:
-                        self.ssh_connection.close()
-                    except:
-                        pass
-                    self.ssh_connection = None
-
-                    return True
+                        # Update hardware status
+                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
+                        return True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to switch to WiFi mode: {error}")
+                        self.error_occurred.emit(f"Failed to switch to WiFi mode: {error}")
+                        return False
                 except Exception as e:
                     self.logger.error(f"Error sending WiFi mode command: {e}")
                     self.error_occurred.emit(f"WiFi mode switch failed: {e}")
@@ -1459,23 +1522,23 @@ class SystemMode(QObject):
                     self.logger.info("Switching to Adhoc mode...")
                     self.message_received.emit("network_status", "Switching to Adhoc mode...")
 
-                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=adhoc &"
+                    switch_command = "sudo python3 ~/switch_wifi_mode.py --mode=adhoc"
                     stdin, stdout, stderr = self.ssh_connection.exec_command(switch_command)
+                    exit_status = stdout.channel.recv_exit_status()
 
-                    # Don't wait for exit status - the connection will drop during network switch
-                    # Just assume success if command was sent
-                    self.logger.info("Adhoc mode switch command sent - connection will drop during switch")
-                    self.message_received.emit("network_status",
-                                               "Adhoc mode switch initiated - SSH connection will drop. Reconnect to Pi on cuepishifter network at 192.168.42.1")
+                    if exit_status == 0:
+                        output = stdout.read().decode().strip()
+                        self.logger.info(f"Adhoc mode switch successful: {output}")
+                        self.message_received.emit("network_status", "Successfully switched to Adhoc mode")
 
-                    # Close the SSH connection since it will be invalid after network switch
-                    try:
-                        self.ssh_connection.close()
-                    except:
-                        pass
-                    self.ssh_connection = None
-
-                    return True
+                        # Update hardware status
+                        self.hardware_status_updated.emit(self.get_comprehensive_system_status())
+                        return True
+                    else:
+                        error = stderr.read().decode().strip()
+                        self.logger.error(f"Failed to switch to Adhoc mode: {error}")
+                        self.error_occurred.emit(f"Failed to switch to Adhoc mode: {error}")
+                        return False
                 except Exception as e:
                     self.logger.error(f"Error sending Adhoc mode command: {e}")
                     self.error_occurred.emit(f"Adhoc mode switch failed: {e}")

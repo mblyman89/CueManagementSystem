@@ -449,8 +449,15 @@ To connect to your Pi, type:
 
     def show_prompt(self):
         """Show the command prompt"""
-        self.append_text(self.prompt)
+        # Move cursor to end
         cursor = self.textCursor()
+        cursor.movePosition(QTextCursor.End)
+        self.setTextCursor(cursor)
+
+        # Insert prompt
+        cursor.insertText(self.prompt)
+
+        # Set prompt position AFTER the prompt text
         self.prompt_position = cursor.position()
         self.setTextCursor(cursor)
         self.ensureCursorVisible()
@@ -785,12 +792,6 @@ class ModeSelector(QDialog):
         # Store parent reference
         self.main_window = parent
 
-        # Get system_mode from parent if available
-        if parent and hasattr(parent, 'system_mode'):
-            self.system_mode = parent.system_mode
-        else:
-            self.system_mode = None
-
         # Initialize default settings with HARDCODED credentials
         self.current_mode = current_mode
         self.communication_method = communication_method
@@ -800,9 +801,6 @@ class ModeSelector(QDialog):
             "username": "cuepishifter",  # Hardcoded username
             "password": "cuepishifter"  # Hardcoded password
         }
-
-        # Store last known WiFi IP for easy switching
-        self.last_wifi_ip = self.connection_settings.get("host", "192.168.68.82")
 
         # Connection status tracking - initialize as connected if in hardware mode
         self.ssh_connected = (current_mode == "hardware")
@@ -817,8 +815,6 @@ class ModeSelector(QDialog):
         # If we're in hardware mode, attempt to connect automatically
         if current_mode == "hardware":
             self.test_ssh_connection_simple(self.connection_settings)
-            # Detect and set the appropriate IP based on current connection
-            self.detect_and_set_initial_ip()
 
     # NEW: Override showEvent to emit shown signal
     def showEvent(self, event):
@@ -1479,64 +1475,6 @@ class ModeSelector(QDialog):
         if hasattr(self, 'terminal_widget'):
             self.terminal_widget.switch_to_pi_mode()
 
-    def detect_and_set_initial_ip(self):
-        """Detect the current network mode and set the appropriate IP address"""
-        if not hasattr(self, 'host_input'):
-            return
-
-        current_ip = self.host_input.text()
-
-        # Check if the current IP is the ad-hoc IP
-        if current_ip == "192.168.42.1":
-            # Already set to ad-hoc IP, update the mode status
-            self.update_network_mode_status("adhoc")
-            self.append_to_terminal("📍 Detected Ad-hoc mode (192.168.42.1)", "#3498db")
-        elif current_ip.startswith("192.168."):
-            # Likely WiFi mode (any 192.168.x.x that's not ad-hoc)
-            self.update_network_mode_status("wifi")
-            self.append_to_terminal(f"📍 Detected WiFi mode ({current_ip})", "#3498db")
-        else:
-            # Unknown, keep as is
-            self.append_to_terminal(f"📍 Current IP: {current_ip}", "#3498db")
-
-    def update_ip_for_mode(self, mode):
-        """Update the IP address field based on the network mode
-
-        Args:
-            mode (str): Current network mode ('wifi' or 'adhoc')
-        """
-        if not hasattr(self, 'host_input'):
-            return
-
-        if mode == "adhoc":
-            # Ad-hoc mode always uses 192.168.42.1
-            # Store the current WiFi IP before switching (if it's not ad-hoc IP)
-            current_ip = self.host_input.text()
-            if current_ip != "192.168.42.1" and current_ip.startswith("192.168."):
-                # Save the WiFi IP for later
-                self.last_wifi_ip = current_ip
-
-            self.host_input.setText("192.168.42.1")
-            self.append_to_terminal("📍 IP address updated to: 192.168.42.1 (Ad-hoc mode)", "#3498db")
-        elif mode == "wifi":
-            # WiFi mode - restore last known WiFi IP or use default
-            current_ip = self.host_input.text()
-
-            # Only update if it's currently the ad-hoc IP
-            if current_ip == "192.168.42.1":
-                # Try to restore last known WiFi IP
-                if hasattr(self, 'last_wifi_ip') and self.last_wifi_ip:
-                    self.host_input.setText(self.last_wifi_ip)
-                    self.append_to_terminal(f"📍 IP address restored to: {self.last_wifi_ip} (WiFi mode)", "#3498db")
-                else:
-                    # Use default WiFi IP from connection settings
-                    default_ip = self.connection_settings.get("host", "192.168.68.82")
-                    self.host_input.setText(default_ip)
-                    self.append_to_terminal(f"📍 IP address set to: {default_ip} (WiFi mode)", "#3498db")
-            else:
-                # Keep the current IP if it's not the ad-hoc one
-                self.append_to_terminal(f"📍 Current IP: {current_ip} - verify this is correct for WiFi mode", "#3498db")
-
     def test_ssh_connection(self):
         """Test SSH connection to Raspberry Pi"""
         self.test_ssh_connection_simple(self.get_connection_settings())
@@ -1849,12 +1787,7 @@ class ModeSelector(QDialog):
 
     def set_wifi_mode(self):
         """Set Pi to WiFi mode"""
-        # Check if system_mode exists and has an active SSH connection
-        has_system_mode = hasattr(self, "system_mode") and self.system_mode is not None
-        has_ssh = has_system_mode and hasattr(self.system_mode,
-                                              "ssh_connection") and self.system_mode.ssh_connection is not None
-
-        if not has_ssh and not self.ssh_connected:
+        if not hasattr(self, "system_mode") or not self.ssh_connected:
             self.append_to_terminal("❌ Cannot set WiFi mode - SSH not connected", "#a93226")  # Red color
             QMessageBox.warning(
                 self,
@@ -1871,11 +1804,7 @@ class ModeSelector(QDialog):
 
             if success:
                 self.append_to_terminal("✅ Successfully switched to WiFi mode", "#1e8449")  # Green color
-                self.append_to_terminal("ℹ️  Pi will connect to Lyman network. You'll need to find the new IP address.",
-                                        "#3498db")  # Blue color
                 self.update_network_mode_status("wifi")
-                # Update IP address field to show a placeholder for WiFi mode
-                self.update_ip_for_mode("wifi")
             else:
                 self.append_to_terminal("❌ Failed to switch to WiFi mode", "#a93226")  # Red color
         else:
@@ -1888,12 +1817,7 @@ class ModeSelector(QDialog):
 
     def set_adhoc_mode(self):
         """Set Pi to Adhoc mode"""
-        # Check if system_mode exists and has an active SSH connection
-        has_system_mode = hasattr(self, "system_mode") and self.system_mode is not None
-        has_ssh = has_system_mode and hasattr(self.system_mode,
-                                              "ssh_connection") and self.system_mode.ssh_connection is not None
-
-        if not has_ssh and not self.ssh_connected:
+        if not hasattr(self, "system_mode") or not self.ssh_connected:
             self.append_to_terminal("❌ Cannot set Adhoc mode - SSH not connected", "#a93226")  # Red color
             QMessageBox.warning(
                 self,
@@ -1910,11 +1834,7 @@ class ModeSelector(QDialog):
 
             if success:
                 self.append_to_terminal("✅ Successfully switched to Adhoc mode", "#1e8449")  # Green color
-                self.append_to_terminal("ℹ️  Pi will create 'cuepishifter' network at 192.168.42.1",
-                                        "#3498db")  # Blue color
                 self.update_network_mode_status("adhoc")
-                # Update IP address field to ad-hoc IP
-                self.update_ip_for_mode("adhoc")
             else:
                 self.append_to_terminal("❌ Failed to switch to Adhoc mode", "#a93226")  # Red color
         else:
@@ -2090,6 +2010,51 @@ try:
     except Exception as pin_error:
         print(f"    ❌ ARM pin {ARM_PIN} FAILED: {pin_error}")
         failed_pins.append(ARM_PIN)
+
+    print("")
+    print("  Clearing shift registers...")
+    # Clear shift registers by shifting out zeros to all chains
+    # This ensures no outputs light up when re-enabled
+    try:
+        import time
+
+        # First, enable shift registers (SRCLR HIGH)
+        for pin in SERIAL_CLEAR_PINS:
+            GPIO.output(pin, GPIO.HIGH)
+
+        # Pulse SRCLR LOW to clear internal state
+        for pin in SERIAL_CLEAR_PINS:
+            GPIO.output(pin, GPIO.LOW)
+        time.sleep(0.001)
+        for pin in SERIAL_CLEAR_PINS:
+            GPIO.output(pin, GPIO.HIGH)
+
+        # Shift out 200 zeros to each chain
+        for chain in range(5):
+            data_pin = DATA_PINS[chain]
+            clock_pin = SCLK_PINS[chain]
+            latch_pin = RCLK_PINS[chain]
+
+            # Shift 200 zeros
+            for _ in range(200):
+                GPIO.output(data_pin, GPIO.LOW)
+                GPIO.output(clock_pin, GPIO.HIGH)
+                GPIO.output(clock_pin, GPIO.LOW)
+
+            # Latch the zeros
+            GPIO.output(latch_pin, GPIO.HIGH)
+            GPIO.output(latch_pin, GPIO.LOW)
+
+            print(f"    ✅ Chain {chain} cleared (200 zeros shifted)")
+
+        # Set SRCLR back to LOW (disabled)
+        for pin in SERIAL_CLEAR_PINS:
+            GPIO.output(pin, GPIO.LOW)
+
+        print("    ✅ All shift registers cleared successfully!")
+    except Exception as clear_error:
+        print(f"    ⚠️  Shift register clearing warning: {clear_error}")
+        # Don't fail the whole operation if clearing fails
 
     print("")
     print("=" * 70)

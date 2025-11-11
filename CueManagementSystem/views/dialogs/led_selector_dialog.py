@@ -13,7 +13,7 @@ class LedSelectorDialog(QDialog):
         super().__init__(parent)
         self.current_view = current_view
         self.setup_ui()
-        self.setWindowTitle("LED Panel View Selector")
+        self.setWindowTitle("View Selector")
         self.setModal(True)
         self.resize(400, 300)
 
@@ -72,25 +72,19 @@ class LedSelectorDialog(QDialog):
         # Button layout
         button_layout = QHBoxLayout()
 
-        # Preview button
-        self.preview_button = QPushButton("Preview")
-        self.preview_button.setToolTip("Preview the selected view without applying")
-        self.preview_button.clicked.connect(self.preview_selection)
+        # Cancel button (moved to left)
+        self.cancel_button = QPushButton("Cancel")
+        self.cancel_button.clicked.connect(self.reject)
 
-        # Apply button
+        # Apply button (moved to middle)
         self.apply_button = QPushButton("Apply")
         self.apply_button.setToolTip("Apply the selected view")
         self.apply_button.clicked.connect(self.apply_selection)
         self.apply_button.setDefault(True)
 
-        # Cancel button
-        self.cancel_button = QPushButton("Cancel")
-        self.cancel_button.clicked.connect(self.reject)
-
-        button_layout.addWidget(self.preview_button)
+        button_layout.addWidget(self.cancel_button)
         button_layout.addStretch()
         button_layout.addWidget(self.apply_button)
-        button_layout.addWidget(self.cancel_button)
 
         layout.addLayout(button_layout)
 
@@ -161,12 +155,8 @@ class LedSelectorDialog(QDialog):
         else:
             new_view = "grouped"
 
-        self.preview_button.setEnabled(new_view != self.current_view)
-
-    def preview_selection(self):
-        """Preview the selected view without applying permanently"""
-        selected_view = "traditional" if self.traditional_radio.isChecked() else "grouped"
-        self.view_changed.emit(f"preview_{selected_view}")
+        # Enable/disable apply button based on whether selection changed
+        self.apply_button.setEnabled(new_view != self.current_view)
 
     def apply_selection(self):
         """Apply the selected view and close dialog"""
