@@ -1,61 +1,446 @@
-# Firework Cue Management System - Requirements
-# This file contains all dependencies required to run the Cue Management System
+============================================================================
 
-# Core GUI Framework
-PySide6>=6.5.0
+Firework Cue Management System - Comprehensive Requirements
 
-# Audio Processing & Analysis
-librosa>=0.10.1
-numpy>=1.24.0
-scipy>=1.10.0
+============================================================================
+
+This file contains all dependencies required to run the Cue Management System
+
+
+
+Python Version: 3.8 - 3.12 (3.10+ recommended for best compatibility)
+
+Last Updated: 2025
+
+============================================================================
+
+============================================================================
+
+CORE GUI FRAMEWORK
+
+============================================================================
+
+PySide6 - Qt for Python, provides the entire GUI framework
+
+Used in: 46+ files including all dialogs, widgets, and main window
+
+PySide6>=6.5.0,<6.8.0
+
+
+============================================================================
+
+AUDIO PROCESSING & ANALYSIS
+
+============================================================================
+
+Librosa - Core audio analysis library for beat detection and feature extraction
+
+Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
+
+librosa>=0.10.1,<0.11.0
+
+
+NumPy - Fundamental package for numerical computing
+
+Used in: 6+ files for array operations, signal processing, and data manipulation
+
+numpy>=1.24.0,<2.0.0
+
+
+SciPy - Scientific computing library for signal processing and filtering
+
+Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
+
+scipy>=1.10.0,<1.12.0
+
+
+SoundFile - Library for reading and writing sound files
+
+Used in: waveform_analyzer.py for audio file I/O
+
 soundfile>=0.12.1
+
+
+AudioRead - Cross-library audio decoding for various formats
+
+Used by librosa for loading audio files in multiple formats
+
 audioread>=3.0.0
 
-# Data Visualization & Plotting
-matplotlib>=3.7.0
+
+Resampy - Efficient audio resampling
+
+Required by librosa for sample rate conversion
+
+resampy>=0.4.2
+
+
+============================================================================
+
+ADVANCED BEAT DETECTION
+
+============================================================================
+
+Madmom - State-of-the-art audio signal processing library for beat tracking
+
+Used in: waveform_analyzer.py for RNN-based beat detection and onset detection
+
+Note: Requires specific NumPy version compatibility
+
+madmom>=0.16.1
+
+
+============================================================================
+
+MACHINE LEARNING
+
+============================================================================
+
+Scikit-learn - Machine learning library for clustering and classification
+
+Used in: waveform_analyzer.py for KMeans clustering, StandardScaler, IsolationForest
+
+scikit-learn>=1.3.0
+
+
+============================================================================
+
+DATA VISUALIZATION & PLOTTING
+
+============================================================================
+
+Matplotlib - Comprehensive plotting library
+
+Used in: waveform_analyzer.py for data visualization and analysis
+
+matplotlib>=3.7.0,<3.9.0
+
+
+Cycler - Composable style cycles for matplotlib
+
 cycler>=0.11.0
+
+
+Kiwisolver - Fast implementation of Cassowary constraint solver
+
 kiwisolver>=1.4.0
+
+
+Pyparsing - Python parsing module
+
 pyparsing>=3.0.0
+
+
+Python-dateutil - Extensions to the standard datetime module
+
 python-dateutil>=2.8.2
 
-# Image Processing
+
+============================================================================
+
+IMAGE PROCESSING
+
+============================================================================
+
+Pillow - Python Imaging Library for image manipulation
+
+Used in: create_icns.py, create_icns_alternative.py for icon creation
+
 Pillow>=10.0.0
 
-# Networking
+
+============================================================================
+
+NETWORKING & SSH
+
+============================================================================
+
+Paramiko - SSHv2 protocol implementation for Python
+
+Used in: 7+ files for SSH connections to Raspberry Pi
+
+Includes: hardware_controller.py, system_mode_controller.py, terminal_session_manager.py
+
+paramiko>=3.3.0
+
+
+AsyncSSH - Asynchronous SSH client and server library
+
+Used for async SSH operations
+
 asyncssh>=2.13.0
+
+
+PyOpenSSL - Python wrapper for OpenSSL
+
+Used for SSL/TLS support in network operations
+
 pyOpenSSL>=23.0.0
 
-# Hardware Control (Raspberry Pi)
-# Note: These are only needed when running on Raspberry Pi hardware
-# RPi.GPIO>=0.7.1; platform_machine=="armv7l" or platform_machine=="aarch64"
-# gpiozero>=1.6.2; platform_machine=="armv7l" or platform_machine=="aarch64"
 
-# System Monitoring & Performance
+Cryptography - Cryptographic recipes and primitives
+
+Required by paramiko and asyncssh
+
+cryptography>=41.0.0
+
+
+============================================================================
+
+HARDWARE CONTROL (RASPBERRY PI)
+
+============================================================================
+
+RPi.GPIO - Raspberry Pi GPIO library
+
+Used in: 8+ files for GPIO control on Raspberry Pi
+
+Only installed on Raspberry Pi hardware (ARM architecture)
+
+RPi.GPIO>=0.7.1; platform_machine=="armv7l" or platform_machine=="aarch64"
+
+
+lgpio - Modern GPIO library for Raspberry Pi
+
+Used in: test_gpio_pins.py as alternative to RPi.GPIO
+
+lgpio>=0.2.0.0; platform_machine=="armv7l" or platform_machine=="aarch64"
+
+
+gpiozero - Simple interface to GPIO devices
+
+Provides high-level interface for GPIO control
+
+gpiozero>=2.0.0; platform_machine=="armv7l" or platform_machine=="aarch64"
+
+
+============================================================================
+
+SYSTEM MONITORING & PERFORMANCE
+
+============================================================================
+
+psutil - Cross-platform process and system utilities
+
+Used in: waveform_analyzer.py for performance monitoring
+
 psutil>=5.9.0
 
-# Utility Libraries
-dataclasses-json>=0.6.0
-tqdm>=4.65.0
-configparser>=5.3.0
-jsonschema>=4.17.0
 
-# Optional Enhancements
+============================================================================
+
+DATA HANDLING & SERIALIZATION
+
+============================================================================
+
+dataclasses-json - JSON serialization for dataclasses
+
+Used for structured data handling
+
+dataclasses-json>=0.6.0
+
+
+orjson - Fast, correct JSON library
+
+Used for high-performance JSON operations
+
 orjson>=3.9.0
 
-# Platform-Specific Requirements
-# Windows-specific audio backend
+
+jsonschema - JSON Schema validation
+
+Used for configuration validation
+
+jsonschema>=4.17.0
+
+
+============================================================================
+
+UTILITY LIBRARIES
+
+============================================================================
+
+tqdm - Progress bar library
+
+Used for showing progress during long operations
+
+tqdm>=4.65.0
+
+
+ConfigParser - Configuration file parser
+
+Used for reading configuration files
+
+configparser>=5.3.0
+
+
+============================================================================
+
+PLATFORM-SPECIFIC REQUIREMENTS
+
+============================================================================
+
+--- Windows-specific ---
+
+PyAudio - Python bindings for PortAudio (audio I/O)
+
+Required for audio playback on Windows
+
 pyaudio>=0.2.11; platform_system=="Windows"
 
-# macOS-specific requirements
+
+--- macOS-specific ---
+
+PyObjC - Python-Objective-C bridge
+
+Required for native macOS integration
+
 pyobjc-framework-Cocoa>=9.0; platform_system=="Darwin"
+pyobjc-framework-Quartz>=9.0; platform_system=="Darwin"
 
-# Linux-specific audio requirements
-# python-alsa>=1.2.7; platform_system=="Linux"
 
-# Note: Spleeter is installed in a separate environment
-# To install Spleeter:
-# conda create -n spleeter_env python=3.8
-# conda activate spleeter_env
-# pip install spleeter
+--- Linux-specific ---
 
-# Python Version Compatibility: Requires Python 3.8 or higher
+Python-ALSA - ALSA bindings for Python
+
+Required for audio on Linux systems
+
+Uncomment if needed:
+
+python-alsa>=1.2.7; platform_system=="Linux"
+
+============================================================================
+
+DEVELOPMENT & BUILD TOOLS (Optional but recommended)
+
+============================================================================
+
+PyInstaller - Package Python applications into standalone executables
+
+Required for building macOS app bundle
+
+Install separately: pip install pyinstaller>=6.0.0
+
+pyinstaller>=6.0.0
+
+============================================================================
+
+SPLEETER AUDIO SEPARATION (SEPARATE ENVIRONMENT)
+
+============================================================================
+
+Spleeter requires a separate Python 3.8 environment due to TensorFlow dependencies
+
+
+
+Installation instructions:
+
+1. Create separate environment:
+
+conda create -n spleeter_env python=3.8
+
+conda activate spleeter_env
+
+
+
+2. Install Spleeter:
+
+For Intel/AMD (x86_64):
+
+pip install spleeter
+
+
+
+For Apple Silicon (arm64):
+
+pip install tensorflow-macos tensorflow-metal spleeter
+
+
+
+3. Download pre-trained models:
+
+spleeter separate -p spleeter:4stems -o output_folder dummy.wav
+
+(Cancel after models download)
+
+
+
+4. Configure path in application:
+
+Set CUE_SPLEETER_PATH environment variable or configure in app settings
+
+
+
+Dependencies in spleeter_env:
+
+- spleeter>=2.3.0
+
+- tensorflow>=2.5.0,<2.6.0 (or tensorflow-macos for Apple Silicon)
+
+- tensorflow-metal (Apple Silicon only)
+
+- ffmpeg-python>=0.2.0
+
+- pandas>=1.0.0
+
+- norbert>=0.2.1
+
+- musdb>=0.4.0
+
+- museval>=0.4.0
+
+============================================================================
+
+============================================================================
+
+ADDITIONAL NOTES
+
+============================================================================
+
+
+
+COMPATIBILITY NOTES:
+
+- NumPy 2.0+ may cause issues with madmom - keep NumPy < 2.0
+
+- Spleeter requires Python 3.8 and cannot be installed in the same environment
+
+- RPi.GPIO only works on Raspberry Pi hardware
+
+- Some audio backends may require system-level dependencies (ffmpeg, libsndfile)
+
+
+
+SYSTEM DEPENDENCIES (install via system package manager):
+
+- ffmpeg (for audio format support)
+
+- libsndfile (for soundfile library)
+
+- portaudio (for pyaudio on Windows/Linux)
+
+- On macOS: Install via Homebrew: brew install ffmpeg libsndfile portaudio
+
+- On Ubuntu/Debian: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev
+
+- On Raspberry Pi: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev python3-rpi.gpio
+
+
+
+RECOMMENDED PYTHON VERSION:
+
+- Python 3.10 or 3.11 for main application
+
+- Python 3.8 for Spleeter environment
+
+
+
+MEMORY REQUIREMENTS:
+
+- Minimum: 8GB RAM
+
+- Recommended: 16GB RAM for large audio files
+
+- Raspberry Pi: 2GB+ recommended
+
+============================================================================
