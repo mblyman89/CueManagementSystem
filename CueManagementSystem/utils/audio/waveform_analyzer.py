@@ -136,9 +136,11 @@ try:
     from madmom.features.tempo import TempoEstimationProcessor
 
     MADMOM_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     MADMOM_AVAILABLE = False
-    logger.warning("⚠️  madmom not available - beat detection features disabled")
+    logger.warning(f"⚠️  madmom not available - beat detection features disabled: {e}")
+    import traceback
+    traceback.print_exc()
 
 # For PySide6 signal/slot mechanism
 try:

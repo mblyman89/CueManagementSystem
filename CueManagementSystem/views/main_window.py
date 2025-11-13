@@ -22,6 +22,17 @@ from views.led_panel.preview_timeline_widget import PreviewTimelineWidget
 from views.managers.preview_state_manager import PreviewStateManager
 from views.managers.show_manager import ShowManager
 
+# Import for Spleeter setup
+try:
+    from views.dialogs.spleeter_setup_dialog import SpleeterSetupDialog
+    from config_manager import get_config_manager
+    from spleeter_service import find_spleeter_python
+
+    SPLEETER_SETUP_AVAILABLE = True
+except ImportError:
+    SPLEETER_SETUP_AVAILABLE = False
+    print("⚠️  Spleeter setup dialog not available")
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
@@ -88,6 +99,37 @@ class MainWindow(QMainWindow):
         # Setup keyboard shortcuts
         self.setup_keyboard_shortcuts()
 
+        # Check for first launch and setup Spleeter if needed
+        self.check_first_launch()
+
+    def check_first_launch(self):
+        """Check if this is first launch and show setup if needed"""
+        if not SPLEETER_SETUP_AVAILABLE:
+            return
+
+        try:
+            config = get_config_manager()
+
+            if config.is_first_launch():
+                # Try auto-discovery first
+                spleeter_path = find_spleeter_python()
+
+                if not spleeter_path:
+                    # Show setup dialog
+                    dialog = SpleeterSetupDialog(self)
+                    result = dialog.exec()
+
+                    if result == QDialog.Accepted:
+                        print("✓ Spleeter configured successfully")
+                    else:
+                        print("⏭️  Skipped Spleeter setup - audio separation features disabled")
+                else:
+                    # Auto-discovered, just mark as launched
+                    config.mark_launched()
+                    print(f"✓ Spleeter auto-discovered at: {spleeter_path}")
+        except Exception as e:
+            print(f"Error during first launch check: {e}")
+
     def init_ui(self):
         # Create central widget and main layout
         central_widget = QWidget()
@@ -101,6 +143,9 @@ class MainWindow(QMainWindow):
         from views.managers.watchdog_status_widget_manager import WatchdogStatusWidget
         self.watchdog_status_widget = WatchdogStatusWidget()
         self.statusBar().addPermanentWidget(self.watchdog_status_widget)
+
+        # Create preferences menu
+        self.create_preferences_menu()
 
         # Main vertical layout
         main_layout = QVBoxLayout(central_widget)
@@ -570,8 +615,8 @@ class MainWindow(QMainWindow):
             # Import the music selection dialog
             from views.dialogs.music_selection_dialog import MusicSelectionDialog
 
-            # Show music selection dialog (hardware mode)
-            music_dialog = MusicSelectionDialog(self, self.music_manager, is_hardware_mode=True)
+            # Show music selection dialog
+            music_dialog = MusicSelectionDialog(self, self.music_manager)
             music_dialog.music_selected.connect(self._start_hardware_execution_with_music)
 
             # If dialog is rejected, don't start execution
@@ -601,25 +646,12 @@ class MainWindow(QMainWindow):
                 print("No cues available for execution")
                 return
 
-            # PRE-LOAD music file to reduce startup latency
-            if music_file_info:
-                print(f"Pre-loading music file: {music_file_info['path']}")
-                # Load the file but don't play yet
-                from PySide6.QtCore import QUrl
-                self.music_manager.player.setSource(QUrl.fromLocalFile(music_file_info['path']))
-                self.music_manager.audio_output.setVolume(0.7)
-                # Wait a moment for file to load
-                time.sleep(0.05)  # 50ms for file loading
-                print("Music file pre-loaded")
-
-            # Calculate INITIAL timestamp for Pi script startup
-            # This is just a placeholder - the REAL timestamp will be calculated after Pi signals READY
-            # Using 10 seconds to give Pi plenty of time to initialize and signal ready
-            start_timestamp = time.time() + 10.0
+            # Calculate start timestamp (500ms from now for synchronization)
+            start_timestamp = time.time() + 0.5
             print(f"\n=== SYNCHRONIZED START ===")
             print(f"Current time: {time.time()}")
             print(f"Start timestamp: {start_timestamp}")
-            print(f"Initial timestamp: {start_timestamp} (placeholder - real sync happens after Pi signals READY)")
+            print(f"Delay: 500ms")
 
             # Prepare status message
             if music_file_info:
@@ -661,9 +693,8 @@ class MainWindow(QMainWindow):
 
             # Start music NOW (synchronized with Pi)
             if music_file_info:
-                # File is already pre-loaded, just call play() for instant start
-                self.music_manager.player.play()
-                print(f"Playing music: {music_file_info['path']} (pre-loaded)")
+                self.music_manager.preview_music(music_file_info['path'], volume=0.7)
+                print(f"Playing music: {music_file_info['path']}")
 
             # Update status bar
             self.statusBar().showMessage(status_message)
@@ -1600,8 +1631,8 @@ class MainWindow(QMainWindow):
             # Import the music selection dialog
             from views.dialogs.music_selection_dialog import MusicSelectionDialog
 
-            # Show music selection dialog with the existing music manager (preview mode)
-            music_dialog = MusicSelectionDialog(self, self.music_manager, is_hardware_mode=False)
+            # Show music selection dialog with the existing music manager
+            music_dialog = MusicSelectionDialog(self, self.music_manager)
             music_dialog.music_selected.connect(self._start_preview_with_music)
 
             # If dialog is rejected, don't start the preview
@@ -1831,6 +1862,16 @@ class MainWindow(QMainWindow):
         try:
             print("Application closing - starting cleanup")
 
+            # Cleanup show execution manager (includes watchdog)
+            if hasattr(self, 'show_execution_manager') and self.show_execution_manager:
+                print("Cleaning up show execution manager")
+                self.show_execution_manager.cleanup()
+
+            # Cleanup watchdog status widget
+            if hasattr(self, 'watchdog_status_widget') and self.watchdog_status_widget:
+                print("Cleaning up watchdog status widget")
+                self.watchdog_status_widget.cleanup()
+
             # Perform synchronous cleanup to avoid event loop issues
             if self.system_mode:
                 self.system_mode.close_connection_sync()
@@ -1925,3 +1966,46 @@ class MainWindow(QMainWindow):
         elif status == "inactive":
             if hasattr(self, 'watchdog_status_widget'):
                 self.watchdog_status_widget.set_monitoring(False)
+
+    def create_preferences_menu(self):
+        """Create preferences menu (call this after menuBar is created)"""
+        if not SPLEETER_SETUP_AVAILABLE:
+            return
+
+        try:
+            prefs_menu = self.menuBar().addMenu("Preferences")
+
+            spleeter_action = prefs_menu.addAction("Configure Spleeter...")
+            spleeter_action.triggered.connect(self.show_spleeter_preferences)
+        except Exception as e:
+            print(f"Could not create preferences menu: {e}")
+
+    def show_spleeter_preferences(self):
+        """Show Spleeter preferences dialog"""
+        if not SPLEETER_SETUP_AVAILABLE:
+            QMessageBox.information(
+                self,
+                "Spleeter Setup Not Available",
+                "Spleeter setup dialog is not available.\n\n"
+                "Please ensure spleeter_setup_dialog.py and config_manager.py are installed."
+            )
+            return
+
+        try:
+            dialog = SpleeterSetupDialog(self)
+            dialog.setWindowTitle("Spleeter Preferences")
+            result = dialog.exec()
+
+            if result == QDialog.Accepted:
+                QMessageBox.information(
+                    self,
+                    "Spleeter Configured",
+                    "Spleeter path has been updated successfully.\n\n"
+                    "Audio separation features are now available."
+                )
+        except Exception as e:
+            QMessageBox.warning(
+                self,
+                "Error",
+                f"Could not open Spleeter preferences:\n{str(e)}"
+            )
