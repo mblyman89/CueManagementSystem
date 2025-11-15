@@ -17,6 +17,7 @@ class ConfigManager:
         self.config_file = self.config_dir / "config.json"
         self._ensure_config_dir()
         self._config = self._load_config()
+        self._migrate_config()  # Clean up deprecated config entries
 
     def _ensure_config_dir(self):
         """Create config directory if it doesn't exist"""
@@ -83,6 +84,13 @@ class ConfigManager:
         """Mark that the app has been launched"""
         self._config["first_launch"] = False
         self.save()
+
+    def _migrate_config(self):
+        """Remove deprecated config entries"""
+        # Remove stems_folder if it exists (no longer used)
+        if 'stems_folder' in self._config:
+            del self._config['stems_folder']
+            self.save()
 
 
 # Global config instance

@@ -1,308 +1,597 @@
 """
-Spleeter Setup Dialog
-Helps users locate their Spleeter installation on first launch
+Enhanced Spleeter Setup Dialog with Automatic Conda + Spleeter Installation
 """
 
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QFileDialog, QMessageBox, QTextEdit
-)
-from PySide6.QtCore import Qt
+from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
+                               QPushButton, QFileDialog, QMessageBox, QTextEdit,
+                               QProgressBar)
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtGui import QFont
-import os
-import subprocess
 from pathlib import Path
+import subprocess
+import os
+import tempfile
+import shutil
+
+
+class CondaAndSpleeterInstallWorker(QThread):
+    """Background thread for Conda + Spleeter installation"""
+    progress = Signal(str)  # Progress messages
+    finished = Signal(bool, str)  # Success, message/path
+
+    def run(self):
+        """Install Conda (if needed) and Spleeter"""
+        try:
+            # Step 1: Check if conda exists
+            self.progress.emit("Checking for conda installation...")
+
+            conda_cmd = self._find_conda()
+
+            if not conda_cmd:
+                self.progress.emit("Conda not found. Installing Miniforge...")
+                conda_cmd = self._install_miniforge()
+
+                if not conda_cmd:
+                    self.finished.emit(False,
+                                       "Failed to install Miniforge. Please install manually from:\nhttps://github.com/conda-forge/miniforge")
+                    return
+
+                self.progress.emit("✓ Miniforge installed successfully!")
+            else:
+                self.progress.emit(f"✓ Found conda at: {conda_cmd}")
+
+            # Step 2: Create Spleeter environment
+            self.progress.emit("Creating Spleeter environment...")
+
+            env_name = "spleeter_arm"
+            result = subprocess.run(
+                [conda_cmd, "create", "-n", env_name, "python=3.8", "-y"],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode != 0:
+                self.finished.emit(False, f"Failed to create conda environment:\n{result.stderr}")
+                return
+
+            self.progress.emit("✓ Environment created successfully!")
+
+            # Step 3: Get Python path
+            conda_base = os.path.dirname(os.path.dirname(conda_cmd))
+            python_path = os.path.join(conda_base, "envs", env_name, "bin", "python")
+
+            if not os.path.exists(python_path):
+                self.finished.emit(False, f"Python not found at expected location: {python_path}")
+                return
+
+            # Step 4: Install TensorFlow
+            self.progress.emit("Installing TensorFlow for macOS...")
+
+            result = subprocess.run(
+                [python_path, "-m", "pip", "install", "tensorflow-macos==2.9.2"],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode != 0:
+                self.finished.emit(False, f"Failed to install TensorFlow:\n{result.stderr}")
+                return
+
+            self.progress.emit("✓ TensorFlow installed!")
+
+            # Step 5: Install Spleeter
+            self.progress.emit("Installing Spleeter...")
+
+            result = subprocess.run(
+                [python_path, "-m", "pip", "install", "spleeter"],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode != 0:
+                self.finished.emit(False, f"Failed to install Spleeter:\n{result.stderr}")
+                return
+
+            self.progress.emit("✓ Spleeter installed!")
+
+            # Step 6: Verify installation
+            self.progress.emit("Verifying installation...")
+
+            result = subprocess.run(
+                [python_path, "-m", "spleeter", "--help"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+
+            if result.returncode != 0:
+                self.finished.emit(False, "Spleeter installed but verification failed")
+                return
+
+            self.progress.emit("✓ Installation complete!")
+            self.finished.emit(True, python_path)
+
+        except subprocess.TimeoutExpired:
+            self.finished.emit(False, "Installation timed out. Please try again.")
+        except Exception as e:
+            self.finished.emit(False, f"Installation error: {str(e)}")
+
+    def _find_conda(self):
+        """Find existing conda installation"""
+        conda_paths = [
+            os.path.expanduser("~/miniforge3/bin/conda"),
+            os.path.expanduser("~/miniconda3/bin/conda"),
+            os.path.expanduser("~/anaconda3/bin/conda"),
+            "/opt/homebrew/bin/conda",
+        ]
+
+        for path in conda_paths:
+            if os.path.exists(path):
+                return path
+
+        # Try to find in PATH
+        result = subprocess.run(
+            ["which", "conda"],
+            capture_output=True,
+            text=True
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+
+        return None
+
+    def _install_miniforge(self):
+        """Install Miniforge for Apple Silicon"""
+        try:
+            self.progress.emit("Downloading Miniforge installer...")
+
+            # Determine architecture
+            result = subprocess.run(
+                ["uname", "-m"],
+                capture_output=True,
+                text=True
+            )
+            arch = result.stdout.strip()
+
+            # Choose appropriate installer
+            if arch == "arm64":
+                installer_url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
+            else:
+                installer_url = "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-x86_64.sh"
+
+            # Download installer
+            temp_dir = tempfile.mkdtemp()
+            installer_path = os.path.join(temp_dir, "miniforge.sh")
+
+            self.progress.emit(f"Downloading from {installer_url}...")
+
+            result = subprocess.run(
+                ["curl", "-L", "-o", installer_path, installer_url],
+                capture_output=True,
+                text=True,
+                timeout=300
+            )
+
+            if result.returncode != 0:
+                return None
+
+            self.progress.emit("✓ Download complete!")
+
+            # Make executable
+            os.chmod(installer_path, 0o755)
+
+            # Install Miniforge
+            install_dir = os.path.expanduser("~/miniforge3")
+
+            self.progress.emit(f"Installing Miniforge to {install_dir}...")
+            self.progress.emit("(This may take a few minutes...)")
+
+            result = subprocess.run(
+                [installer_path, "-b", "-p", install_dir],
+                capture_output=True,
+                text=True,
+                timeout=600
+            )
+
+            # Clean up
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+            if result.returncode != 0:
+                return None
+
+            # Return conda path
+            conda_path = os.path.join(install_dir, "bin", "conda")
+            if os.path.exists(conda_path):
+                return conda_path
+
+            return None
+
+        except Exception as e:
+            self.progress.emit(f"Error installing Miniforge: {e}")
+            return None
 
 
 class SpleeterSetupDialog(QDialog):
-    """Dialog to help user locate Spleeter installation"""
+    """Dialog for Spleeter configuration with automatic Conda + Spleeter installation"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.selected_path = None
+        self.install_worker = None
+        self.setWindowTitle("Spleeter Setup")
+        self.setMinimumWidth(700)
+        self.setMinimumHeight(850)
         self.setup_ui()
 
     def setup_ui(self):
-        """Setup the dialog UI"""
-        self.setWindowTitle("CuePi Setup - Locate Spleeter")
-        self.setMinimumWidth(700)
-        self.setMinimumHeight(500)
-
+        """Set up the dialog UI"""
         layout = QVBoxLayout()
         layout.setSpacing(20)
-        layout.setContentsMargins(30, 30, 30, 30)
 
         # Title
-        title = QLabel("Welcome to CuePi!")
+        title = QLabel("🎵 Spleeter Audio Separation Setup")
         title_font = QFont()
-        title_font.setPointSize(24)
+        title_font.setPointSize(18)
         title_font.setBold(True)
         title.setFont(title_font)
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
-        # Subtitle
-        subtitle = QLabel("Professional Firework Cue Management System")
-        subtitle_font = QFont()
-        subtitle_font.setPointSize(12)
-        subtitle.setFont(subtitle_font)
-        subtitle.setAlignment(Qt.AlignCenter)
-        subtitle.setStyleSheet("color: #666;")
-        layout.addWidget(subtitle)
+        # Description
+        desc = QLabel(
+            "Spleeter is an <b>optional feature</b> that separates drum tracks from music.\n"
+            "This improves beat detection accuracy for complex audio files."
+        )
+        desc.setWordWrap(True)
+        desc.setAlignment(Qt.AlignCenter)
+        desc.setStyleSheet("color: #d97706; font-size: 13px; font-weight: bold;")
+        layout.addWidget(desc)
 
-        layout.addSpacing(20)
+        # Installation section
+        install_label = QLabel("Option 1: Automatic Installation (Recommended)")
+        install_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2563eb;")
+        layout.addWidget(install_label)
 
-        # Instructions
-        instructions = QTextEdit()
-        instructions.setReadOnly(True)
-        instructions.setMaximumHeight(250)
-        instructions.setHtml("""
-        <style>
-            body { font-size: 13px; line-height: 1.6; }
-            h3 { color: #2c3e50; margin-top: 15px; }
-            ul { margin-left: 20px; }
-            li { margin-bottom: 8px; }
-            .highlight { background-color: #fff3cd; padding: 2px 5px; border-radius: 3px; }
-        </style>
+        install_desc = QLabel(
+            "Click the button below to automatically install everything needed.\n"
+            "This will install Conda (if needed) and Spleeter with all dependencies."
+        )
+        install_desc.setWordWrap(True)
+        install_desc.setStyleSheet("font-size: 13px; color: white; font-weight: 500; margin-left: 20px;")
+        layout.addWidget(install_desc)
 
-        <h3>🎵 Audio Separation Setup (Optional)</h3>
-        <p>CuePi can use <b>Spleeter</b> to separate audio tracks into individual stems 
-        (vocals, drums, bass, etc.). This is an <span class="highlight">optional feature</span> 
-        for advanced audio analysis.</p>
-
-        <h3>✅ If you have Spleeter installed:</h3>
-        <ul>
-            <li>Click <b>"Browse"</b> below to locate your Spleeter Python executable</li>
-            <li><b>Common locations:</b>
-                <ul>
-                    <li><code>~/anaconda3/envs/spleeter_cpu/bin/python</code></li>
-                    <li><code>~/miniconda3/envs/spleeter_cpu/bin/python</code></li>
-                    <li><code>~/.venvs/spleeter_cpu/bin/python</code></li>
-                </ul>
-            </li>
-        </ul>
-
-        <h3>⏭️ If you don't have Spleeter:</h3>
-        <ul>
-            <li>Click <b>"Skip"</b> to use CuePi without audio separation</li>
-            <li>All other features will work perfectly!</li>
-            <li>You can configure Spleeter later in <b>Preferences → Configure Spleeter</b></li>
-        </ul>
+        # Install button
+        self.install_btn = QPushButton("🚀 Install Everything Automatically")
+        self.install_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: white;
+                border: none;
+                padding: 12px;
+                font-size: 14px;
+                font-weight: bold;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+            QPushButton:disabled {
+                background-color: #9ca3af;
+            }
         """)
-        layout.addWidget(instructions)
+        self.install_btn.clicked.connect(self.install_everything)
+        layout.addWidget(self.install_btn)
 
-        # Path display
+        # Progress area
+        self.progress_text = QTextEdit()
+        self.progress_text.setReadOnly(True)
+        self.progress_text.setMaximumHeight(150)
+        self.progress_text.setStyleSheet("""
+            QTextEdit {
+                background-color: #1f2937;
+                color: #10b981;
+                border: 1px solid #374151;
+                border-radius: 4px;
+                padding: 8px;
+                font-family: 'Courier New', monospace;
+                font-size: 11px;
+            }
+        """)
+        self.progress_text.hide()
+        layout.addWidget(self.progress_text)
+
+        # Progress bar
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setRange(0, 0)  # Indeterminate
+        self.progress_bar.hide()
+        layout.addWidget(self.progress_bar)
+
+        # Separator
+        separator = QLabel("─" * 80)
+        separator.setAlignment(Qt.AlignCenter)
+        separator.setStyleSheet("color: #d1d5db;")
+        layout.addWidget(separator)
+
+        # Manual configuration section
+        manual_label = QLabel("Option 2: Manual Configuration")
+        manual_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #2563eb;")
+        layout.addWidget(manual_label)
+
+        manual_desc = QLabel(
+            "If you already have Spleeter installed, you can manually select its Python path."
+        )
+        manual_desc.setWordWrap(True)
+        manual_desc.setStyleSheet("font-size: 13px; color: white; font-weight: 500; margin-left: 20px;")
+        layout.addWidget(manual_desc)
+
+        # Manual buttons
+        button_layout = QHBoxLayout()
+
+        self.browse_btn = QPushButton("📁 Browse for Python...")
+        self.browse_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3b82f6;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #2563eb;
+            }
+        """)
+        self.browse_btn.clicked.connect(self.browse_for_python)
+        button_layout.addWidget(self.browse_btn)
+
+        self.auto_find_btn = QPushButton("🔍 Auto-Find Spleeter")
+        self.auto_find_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #10b981;
+                color: white;
+                border: none;
+                padding: 10px 20px;
+                font-size: 13px;
+                font-weight: bold;
+                border-radius: 6px;
+            }
+            QPushButton:hover {
+                background-color: #059669;
+            }
+        """)
+        self.auto_find_btn.clicked.connect(self.auto_find_spleeter)
+        button_layout.addWidget(self.auto_find_btn)
+
+        layout.addLayout(button_layout)
+
+        # Selected path display
         self.path_label = QLabel("No path selected")
         self.path_label.setStyleSheet("""
-            QLabel {
-                padding: 15px;
-                background-color: #f8f9fa;
-                border: 2px solid #dee2e6;
-                border-radius: 6px;
-                font-family: monospace;
-                font-size: 12px;
-            }
+            color: #495057;
+            font-size: 14px;
+            font-weight: bold;
+            padding: 10px;
+            background-color: #f8f9fa;
+            border-radius: 4px;
         """)
         self.path_label.setWordWrap(True)
         layout.addWidget(self.path_label)
 
-        # Browse button
-        browse_btn = QPushButton("📁 Browse for Spleeter Python...")
-        browse_btn.clicked.connect(self.browse_for_spleeter)
-        browse_btn.setMinimumHeight(45)
-        browse_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #007bff;
-                color: white;
-                border: none;
-                border-radius: 6px;
-                font-size: 14px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #0056b3;
-            }
-            QPushButton:pressed {
-                background-color: #004085;
-            }
-        """)
-        layout.addWidget(browse_btn)
+        # Bottom buttons
+        bottom_layout = QHBoxLayout()
 
-        layout.addSpacing(10)
-
-        # Buttons
-        button_layout = QHBoxLayout()
-
-        skip_btn = QPushButton("Skip (Use Without Spleeter)")
-        skip_btn.clicked.connect(self.skip_setup)
-        skip_btn.setMinimumHeight(40)
-        skip_btn.setStyleSheet("""
+        self.skip_btn = QPushButton("Skip for Now")
+        self.skip_btn.setStyleSheet("""
             QPushButton {
                 background-color: #6c757d;
                 color: white;
                 border: none;
-                border-radius: 6px;
+                padding: 10px 20px;
                 font-size: 13px;
-                padding: 0 20px;
+                border-radius: 6px;
             }
             QPushButton:hover {
                 background-color: #5a6268;
             }
         """)
-        button_layout.addWidget(skip_btn)
+        self.skip_btn.clicked.connect(self.skip_setup)
+        bottom_layout.addWidget(self.skip_btn)
 
-        button_layout.addStretch()
+        bottom_layout.addStretch()
 
-        self.ok_btn = QPushButton("✓ Continue")
-        self.ok_btn.clicked.connect(self.accept_setup)
-        self.ok_btn.setEnabled(False)
-        self.ok_btn.setMinimumWidth(150)
-        self.ok_btn.setMinimumHeight(40)
-        self.ok_btn.setStyleSheet("""
+        self.save_btn = QPushButton("Save Configuration")
+        self.save_btn.setStyleSheet("""
             QPushButton {
-                background-color: #28a745;
+                background-color: #10b981;
                 color: white;
                 border: none;
-                border-radius: 6px;
-                font-size: 14px;
+                padding: 10px 20px;
+                font-size: 13px;
                 font-weight: bold;
+                border-radius: 6px;
             }
             QPushButton:hover {
-                background-color: #218838;
-            }
-            QPushButton:pressed {
-                background-color: #1e7e34;
+                background-color: #059669;
             }
             QPushButton:disabled {
-                background-color: #c3e6cb;
-                color: #6c757d;
+                background-color: #9ca3af;
             }
         """)
-        button_layout.addWidget(self.ok_btn)
+        self.save_btn.setEnabled(False)
+        self.save_btn.clicked.connect(self.save_configuration)
+        bottom_layout.addWidget(self.save_btn)
 
-        layout.addLayout(button_layout)
+        layout.addLayout(bottom_layout)
 
         self.setLayout(layout)
 
-    def validate_spleeter_path(self, path: str) -> bool:
-        """
-        Validate that a path points to a working Spleeter installation
+    def install_everything(self):
+        """Start automatic Conda + Spleeter installation"""
+        reply = QMessageBox.question(
+            self,
+            "Install Conda + Spleeter",
+            "This will automatically install:\n\n"
+            "1. Miniforge (if conda not found)\n"
+            "2. Python 3.8 environment\n"
+            "3. TensorFlow for macOS\n"
+            "4. Spleeter\n\n"
+            "This may take 10-15 minutes depending on your internet speed.\n\n"
+            "Continue?",
+            QMessageBox.Yes | QMessageBox.No
+        )
 
-        Args:
-            path: Path to Python executable
+        if reply == QMessageBox.No:
+            return
 
-        Returns:
-            True if valid, False otherwise
-        """
-        if not path or not os.path.exists(path):
-            return False
+        # Disable buttons during installation
+        self.install_btn.setEnabled(False)
+        self.browse_btn.setEnabled(False)
+        self.auto_find_btn.setEnabled(False)
+        self.skip_btn.setEnabled(False)
 
-        # Check if it's executable
-        if not os.access(path, os.X_OK):
-            return False
+        # Show progress
+        self.progress_text.show()
+        self.progress_bar.show()
+        self.progress_text.clear()
 
-        # Try to import spleeter
-        try:
-            result = subprocess.run(
-                [path, "-c", "import spleeter; print('OK')"],
-                capture_output=True,
-                text=True,
-                timeout=10
+        # Start installation
+        self.install_worker = CondaAndSpleeterInstallWorker()
+        self.install_worker.progress.connect(self.on_install_progress)
+        self.install_worker.finished.connect(self.on_install_finished)
+        self.install_worker.start()
+
+    def on_install_progress(self, message):
+        """Handle installation progress updates"""
+        self.progress_text.append(f"➤ {message}")
+        # Auto-scroll to bottom
+        cursor = self.progress_text.textCursor()
+        cursor.movePosition(cursor.End)
+        self.progress_text.setTextCursor(cursor)
+
+    def on_install_finished(self, success, result):
+        """Handle installation completion"""
+        self.progress_bar.hide()
+
+        # Re-enable buttons
+        self.install_btn.setEnabled(True)
+        self.browse_btn.setEnabled(True)
+        self.auto_find_btn.setEnabled(True)
+        self.skip_btn.setEnabled(True)
+
+        if success:
+            self.progress_text.append(f"\n✅ SUCCESS! Everything installed at:\n{result}")
+            self.selected_path = result
+            self.path_label.setText(f"✓ Selected: {result}")
+            self.path_label.setStyleSheet("""
+                color: #059669;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #d1fae5;
+                border-radius: 4px;
+            """)
+            self.save_btn.setEnabled(True)
+
+            QMessageBox.information(
+                self,
+                "Installation Complete",
+                f"Conda and Spleeter have been successfully installed!\n\n"
+                f"Python path: {result}\n\n"
+                f"Click 'Save Configuration' to finish setup."
             )
-            return result.returncode == 0 and "OK" in result.stdout
-        except Exception as e:
-            print(f"Validation error: {e}")
-            return False
+        else:
+            self.progress_text.append(f"\n❌ FAILED:\n{result}")
+            QMessageBox.critical(
+                self,
+                "Installation Failed",
+                f"Failed to install:\n\n{result}\n\n"
+                f"You can try manual configuration instead."
+            )
 
-    def browse_for_spleeter(self):
-        """Open file browser to select Spleeter Python"""
-        # Start in home directory
-        start_dir = str(Path.home())
-
+    def browse_for_python(self):
+        """Browse for Python executable"""
         file_path, _ = QFileDialog.getOpenFileName(
             self,
-            "Select Spleeter Python Executable",
-            start_dir,
-            "Python Executable (python python3);;All Files (*)"
+            "Select Python Executable",
+            str(Path.home()),
+            "Python Executable (python*)"
         )
 
         if file_path:
-            # Show validation message
-            self.path_label.setText(f"⏳ Validating: {file_path}\n\nPlease wait...")
-            self.path_label.setStyleSheet("""
-                QLabel {
-                    padding: 15px;
-                    background-color: #fff3cd;
-                    border: 2px solid #ffc107;
-                    border-radius: 6px;
-                    font-family: monospace;
-                    font-size: 12px;
-                    color: #856404;
-                }
-            """)
-
-            # Process events to show the message
-            from PySide6.QtWidgets import QApplication
-            QApplication.processEvents()
-
-            # Validate the path
             if self.validate_spleeter_path(file_path):
                 self.selected_path = file_path
-                self.path_label.setText(f"✓ Valid Spleeter installation found!\n\n{file_path}")
+                self.path_label.setText(f"✓ Selected: {file_path}")
                 self.path_label.setStyleSheet("""
-                    QLabel {
-                        padding: 15px;
-                        background-color: #d4edda;
-                        border: 2px solid #28a745;
-                        border-radius: 6px;
-                        font-family: monospace;
-                        font-size: 12px;
-                        color: #155724;
-                    }
+                    color: #059669;
+                    font-size: 14px;
+                    font-weight: bold;
+                    padding: 10px;
+                    background-color: #d1fae5;
+                    border-radius: 4px;
                 """)
-                self.ok_btn.setEnabled(True)
+                self.save_btn.setEnabled(True)
             else:
-                self.path_label.setText(
-                    f"✗ Invalid Spleeter installation\n\n{file_path}\n\nSpleeter is not installed in this Python environment.")
-                self.path_label.setStyleSheet("""
-                    QLabel {
-                        padding: 15px;
-                        background-color: #f8d7da;
-                        border: 2px solid #dc3545;
-                        border-radius: 6px;
-                        font-family: monospace;
-                        font-size: 12px;
-                        color: #721c24;
-                    }
-                """)
-                self.ok_btn.setEnabled(False)
-
                 QMessageBox.warning(
                     self,
-                    "Invalid Spleeter Installation",
-                    "<b>The selected Python executable does not have Spleeter installed.</b><br><br>"
-                    "Please select a Python executable from a Spleeter environment.<br><br>"
-                    "<b>To install Spleeter:</b><br>"
-                    "1. Create a conda environment: <code>conda create -n spleeter_cpu python=3.8</code><br>"
-                    "2. Activate it: <code>conda activate spleeter_cpu</code><br>"
-                    "3. Install Spleeter: <code>pip install spleeter</code><br>"
-                    "4. Then select the Python executable from that environment."
+                    "Invalid Path",
+                    f"Spleeter is not installed in this Python environment:\n{file_path}"
                 )
 
-    def accept_setup(self):
-        """Accept and save the selected path"""
-        if self.selected_path:
-            # Import here to avoid circular imports
-            from config_manager import get_config_manager
-            config = get_config_manager()
-            config.set_spleeter_path(self.selected_path)
-            config.mark_launched()
-            self.accept()
+    def auto_find_spleeter(self):
+        """Auto-discover Spleeter installation"""
+        from utils.audio.spleeter_service import find_spleeter_python
+
+        path = find_spleeter_python()
+
+        if path:
+            self.selected_path = path
+            self.path_label.setText(f"✓ Found: {path}")
+            self.path_label.setStyleSheet("""
+                color: #059669;
+                font-size: 14px;
+                font-weight: bold;
+                padding: 10px;
+                background-color: #d1fae5;
+                border-radius: 4px;
+            """)
+            self.save_btn.setEnabled(True)
+            QMessageBox.information(
+                self,
+                "Spleeter Found",
+                f"Found Spleeter at:\n{path}"
+            )
+        else:
+            QMessageBox.information(
+                self,
+                "Not Found",
+                "Could not find Spleeter installation.\n\n"
+                "Try automatic installation or browse manually."
+            )
+
+    def validate_spleeter_path(self, path):
+        """Validate that path has Spleeter installed"""
+        from utils.audio.spleeter_service import validate_spleeter_path
+        return validate_spleeter_path(path)
 
     def skip_setup(self):
         """Skip Spleeter setup"""
-        # Import here to avoid circular imports
-        from config_manager import get_config_manager
-        config = get_config_manager()
-        config.mark_launched()
-        self.reject()
+        self.selected_path = None
+        self.accept()
+
+    def save_configuration(self):
+        """Save Spleeter configuration"""
+        if self.selected_path:
+            from config_manager import get_config_manager
+            config = get_config_manager()
+            config.set_spleeter_path(self.selected_path)
+            self.accept()
+        else:
+            QMessageBox.warning(
+                self,
+                "No Path Selected",
+                "Please select a Spleeter Python path or skip setup."
+            )

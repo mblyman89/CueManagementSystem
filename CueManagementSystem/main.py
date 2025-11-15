@@ -2,12 +2,55 @@ import sys
 import asyncio
 import os
 from PySide6.QtWidgets import QApplication, QMessageBox
+from PySide6.QtCore import QCoreApplication
 from views.main_window import MainWindow
 from views.welcome_page import WelcomePage
 from PySide6.QtAsyncio.events import QAsyncioEventLoop
+import logging
+from pathlib import Path
+
+log_dir = Path.home() / "Desktop" / "CuePi_Logs"
+log_dir.mkdir(exist_ok=True)
+log_file = log_dir / "CuePi_debug.log"
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.FileHandler(str(log_file)),
+        logging.StreamHandler()
+    ]
+)
+
+logger = logging.getLogger(__name__)
+logger.info("CuePi Application Starting")
 
 # Suppress Qt layer-backing warnings on macOS
 os.environ["QT_MAC_WANTS_LAYER"] = "1"
+
+# ============================================================================
+# CRITICAL: Set application name for macOS menu bar
+# This works both when running from PyCharm AND when running as app bundle
+# ============================================================================
+if sys.platform.startswith('darwin'):
+    # For running directly from Python (PyCharm, terminal, etc.)
+    # Use PyObjC to set the app name via Cocoa
+    try:
+        from Foundation import NSBundle
+        bundle = NSBundle.mainBundle()
+        if bundle:
+            app_name = "CuePiShifter"
+            app_info = bundle.localizedInfoDictionary() or bundle.infoDictionary()
+            if app_info:
+                app_info['CFBundleName'] = app_name
+    except ImportError:
+        # PyObjC not available, fall back to Qt method (works for app bundles)
+        pass
+
+# Also set via Qt (works for app bundles)
+QCoreApplication.setApplicationName("CuePiShifter")
+QCoreApplication.setOrganizationName("CueManagementSystem")
+QCoreApplication.setOrganizationDomain("https://github.com/mblyman89/CueManagementSystem")
 
 class Application:
     def __init__(self):

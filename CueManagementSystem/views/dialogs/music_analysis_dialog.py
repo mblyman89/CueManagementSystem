@@ -445,16 +445,19 @@ class MusicAnalysisDialog(QDialog):
         self.analyze_btn.setEnabled(False)
 
         # Configure output directory
-        output_dir = None
-        if self.save_stems.isChecked():
-            # Save to same directory as original file
-            original_path = Path(self.music_file_info['path'])
-            output_dir = str(original_path.parent / f"{original_path.stem}_stems")
+        # Use temp directory for Spleeter (always has permission)
+        # We'll move files to user-selected location after separation
+        import tempfile
+        output_dir = tempfile.mkdtemp(prefix="spleeter_")
+        print(f"📁 Using temporary directory for Spleeter: {output_dir}")
+
+        # Store temp dir for cleanup later
+        self.temp_output_dir = output_dir
 
         # Start separation
         self.spleeter_service.separate_audio_async(
             self.music_file_info['path'],
-            output_dir,
+            output_dir,  # Temp directory
             show_progress=False  # We handle progress ourselves
         )
 
@@ -479,20 +482,58 @@ class MusicAnalysisDialog(QDialog):
         """Handle successful separation completion"""
         print(f"✅ Audio separation completed in {result.processing_time:.2f}s")
 
+        # Prompt user to select where to save stems
+        from PySide6.QtWidgets import QFileDialog
+        from pathlib import Path
+        import shutil
+
+        save_dir = QFileDialog.getExistingDirectory(
+            self,
+            "Select Folder to Save Separated Stems",
+            str(Path.home() / "Downloads"),
+            QFileDialog.Option.ShowDirsOnly
+        )
+
+        if save_dir:
+            # Move stems from temp directory to user-selected location
+            print(f"📁 Moving stems to user-selected folder: {save_dir}")
+            moved_stems = {}
+
+            for stem_name, temp_path in result.stems.items():
+                try:
+                    # Get filename from temp path
+                    filename = os.path.basename(temp_path)
+                    # Create destination path
+                    dest_path = os.path.join(save_dir, filename)
+                    # Copy file (don't move, in case we need it)
+                    shutil.copy2(temp_path, dest_path)
+                    moved_stems[stem_name] = dest_path
+                    print(f"✅ Moved {stem_name}: {dest_path}")
+                except Exception as e:
+                    print(f"❌ Failed to move {stem_name}: {e}")
+                    # Use original temp path as fallback
+                    moved_stems[stem_name] = temp_path
+
+            # Update result with new paths
+            self.separated_stems = moved_stems
+        else:
+            # User cancelled - use temp directory paths
+            print("⚠️ User cancelled save location - using temp directory")
+            self.separated_stems = result.stems
+
         self.separation_result = result
-        self.separated_stems = result.stems
 
         # Update progress
-        self.progress_label.setText(f"Separation completed! Generated {len(result.stems)} stems")
+        self.progress_label.setText(f"Separation completed! Generated {len(self.separated_stems)} stems")
         self.separation_progress_bar.setValue(100)
 
         # Show results
         self.results_text.setVisible(True)
         results_text = f"Separation completed in {result.processing_time:.2f} seconds\n"
-        results_text += f"Generated stems: {', '.join(result.stems.keys())}\n"
+        results_text += f"Generated stems: {', '.join(self.separated_stems.keys())}\n"
 
-        if 'drums' in result.stems:
-            results_text += f"Drum track: {os.path.basename(result.stems['drums'])}"
+        if 'drums' in self.separated_stems:
+            results_text += f"Drum track: {os.path.basename(self.separated_stems['drums'])}"
 
         self.results_text.setPlainText(results_text)
 
@@ -524,10 +565,17 @@ class MusicAnalysisDialog(QDialog):
 
     def _proceed_to_analysis(self):
         """Proceed to waveform analysis after successful separation"""
+        print(f"🔍 DEBUG: _proceed_to_analysis called")
+        print(f"🔍 DEBUG: auto_select_drums.isChecked() = {self.auto_select_drums.isChecked()}")
+        print(f"🔍 DEBUG: separated_stems = {self.separated_stems}")
+        print(
+            f"🔍 DEBUG: 'drums' in separated_stems = {'drums' in self.separated_stems if self.separated_stems else 'N/A'}")
+
         if self.auto_select_drums.isChecked() and 'drums' in self.separated_stems:
             # Use separated drum track
             drum_path = self.separated_stems['drums']
             print(f"🥁 Using separated drum track: {drum_path}")
+            print(f"🔍 DEBUG: drum_path = {drum_path}")
 
             # Create modified file info for drum track
             drum_file_info = self.music_file_info.copy()
@@ -537,9 +585,13 @@ class MusicAnalysisDialog(QDialog):
             drum_file_info['original_file'] = self.music_file_info['path']
             drum_file_info['separation_result'] = self.separation_result
 
+            print(f"🔍 DEBUG: drum_file_info['path'] = {drum_file_info['path']}")
+            print(f"🔍 DEBUG: Calling _open_waveform_analysis_dialog with drum_path={drum_path}")
+
             self._open_waveform_analysis_dialog(drum_path, drum_file_info)
         else:
             # Use original file
+            print(f"⚠️ DEBUG: Using original file (drums not selected or not available)")
             self._open_waveform_analysis_dialog(self.music_file_info['path'])
 
     def _open_waveform_analysis_dialog(self, file_path: str, file_info: dict = None):
@@ -565,8 +617,10 @@ class MusicAnalysisDialog(QDialog):
             comprehensive_analyzer = ComprehensiveAnalyzer()
 
             # Load the file into the analyzer
+            print(f"🔍 DEBUG: About to load file_path into analyzer: {file_path}")
+            print(f"🔍 DEBUG: analysis_file_info['path'] = {analysis_file_info.get('path', 'NOT SET')}")
             if comprehensive_analyzer.load_file(file_path):
-                print("🎵 File loaded into comprehensive analyzer")
+                print(f"🎵 File loaded into comprehensive analyzer: {file_path}")
                 waveform_dialog.set_analyzer(comprehensive_analyzer)
             else:
                 print("⚠️ Failed to load file into comprehensive analyzer, using fallback")

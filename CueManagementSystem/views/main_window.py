@@ -4,8 +4,16 @@ import traceback
 from PySide6.QtWidgets import (QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
                                QMessageBox, QDialog, QApplication,
                                QStatusBar)
-from PySide6.QtCore import Qt, QMetaObject, Q_ARG, Slot
+from PySide6.QtCore import Qt, QMetaObject, Q_ARG, Slot, QCoreApplication
 from PySide6.QtGui import QShortcut, QKeySequence
+
+# ============================================================================
+# CRITICAL: Set application metadata BEFORE creating QApplication
+# This ensures macOS displays "CuePi" in the menu bar instead of "Python"
+# ============================================================================
+QCoreApplication.setApplicationName("CuePiShifter")
+QCoreApplication.setOrganizationName("CueManagementSystem")
+QCoreApplication.setOrganizationDomain("https://github.com/mblyman89/CueManagementSystem")
 from views.table.cue_table import CueTableView
 from utils.data_utils import get_test_data
 from views.managers.led_panel_manager import LedPanelManager
@@ -26,12 +34,15 @@ from views.managers.show_manager import ShowManager
 try:
     from views.dialogs.spleeter_setup_dialog import SpleeterSetupDialog
     from config_manager import get_config_manager
-    from spleeter_service import find_spleeter_python
+    from utils.audio.spleeter_service import find_spleeter_python
 
     SPLEETER_SETUP_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     SPLEETER_SETUP_AVAILABLE = False
-    print("⚠️  Spleeter setup dialog not available")
+    print(f"⚠️  Spleeter setup dialog not available: {e}")
+    import traceback
+
+    traceback.print_exc()
 
 
 class MainWindow(QMainWindow):
@@ -2009,3 +2020,7 @@ class MainWindow(QMainWindow):
                 "Error",
                 f"Could not open Spleeter preferences:\n{str(e)}"
             )
+            import traceback
+            traceback.print_exc()
+
+
