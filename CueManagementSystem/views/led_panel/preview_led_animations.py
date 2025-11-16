@@ -1,12 +1,28 @@
+"""
+Preview LED Animation Controller
+================================
+
+Manages LED animations in preview mode where LEDs remain illuminated for visual feedback.
+
+Features:
+- Preview mode LED animations
+- Persistent LED illumination
+- Start, stop, update animation methods
+- Cue-based animation control
+- Instant LED state setting
+- Clear LED state functionality
+- Immediate visual feedback
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtCore import QTimer, QObject
 from typing import List, Dict
 
 
 class PreviewLedAnimationController(QObject):
-    """
-    Special LED animation controller for preview mode.
-    Similar to regular LED animations but LEDs stay on instead of blinking off.
-    """
 
     def __init__(self, led_grid):
         super().__init__()

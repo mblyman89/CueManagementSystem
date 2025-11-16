@@ -1,3 +1,21 @@
+"""
+Custom Cue Table Widget
+=======================
+
+Custom table widget with overridden styling to provide visual consistency and handle corner widget issues.
+
+Features:
+- Custom styling overrides
+- White corner issue fix
+- Consistent visual appearance
+- Integration with cue table model
+- Enhanced user experience
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QTableView
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPainter, QColor
@@ -5,10 +23,6 @@ from views.table.cue_table import CueTableView
 
 
 class CueTableWidget(QWidget):
-    """
-    Custom widget wrapper for the cue table that eliminates the white corner issue
-    by providing complete control over the table's appearance and styling.
-    """
 
     def __init__(self):
         super().__init__()

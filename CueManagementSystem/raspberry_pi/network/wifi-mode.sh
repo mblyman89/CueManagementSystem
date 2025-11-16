@@ -1,4 +1,24 @@
 #!/bin/bash
+"""
+WiFi Mode Switching Script
+==========================
+
+Bash script to configure Raspberry Pi to connect to a specified WiFi network, disconnecting from ad-hoc mode.
+
+Features:
+- WiFi network connection
+- Ad-hoc disconnection
+- NetworkManager integration
+- Connection creation if needed
+- Root privilege checking
+- Error handling
+- Status reporting
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 # wifi-mode - Switch Raspberry Pi to WiFi Mode
 # Usage: sudo wifi-mode
 

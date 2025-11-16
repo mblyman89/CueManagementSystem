@@ -1,3 +1,24 @@
+"""
+Waveform Visualization Widget
+=============================
+
+Custom Qt widget for rendering and interacting with audio waveforms with advanced features.
+
+Features:
+- Optimized waveform rendering
+- Zoom and pan controls
+- Scrolling support
+- Peak visualization
+- Professional rendering modes
+- Background thread rendering
+- Performance optimization
+- Interactive controls
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget, QApplication, QMessageBox
 from PySide6.QtCore import Qt, Signal, QRect, QSize, QPoint, Slot, QTimer, QThread
 from PySide6.QtGui import (
@@ -154,12 +175,18 @@ class WaveformView(QWidget):
         self.mouse_dragging = False
         self.drag_start_offset = 0.0
 
-        # Professional renderer
+        # Professional renderer (always enabled for optimal visualization)
         self.professional_renderer = ProfessionalWaveformRenderer()
-        self.rendering_config = RenderingConfig()
-        self.current_render_mode = WaveformRenderMode.RMS_ENVELOPE
+        self.rendering_config = RenderingConfig(
+            mode=WaveformRenderMode.FREQUENCY_BANDS,  # Default to Frequency Bands (optimal for drums)
+            color_scheme=ColorScheme.PROFESSIONAL_DARK,  # Professional Dark (best contrast)
+            smoothing_factor=0.15,  # Moderate smoothing for cleaner visualization
+            dynamic_range_db=60.0,  # Professional standard
+            frequency_bands=12,  # Better frequency resolution for drums
+        )
+        self.current_render_mode = WaveformRenderMode.FREQUENCY_BANDS
         self.current_color_scheme = ColorScheme.PROFESSIONAL_DARK
-        self.use_professional_rendering = True
+        self.use_professional_rendering = True  # Always enabled
 
         # Background rendering for performance
         self.background_renderer = None
@@ -2395,11 +2422,9 @@ class WaveformView(QWidget):
         # If scheme hasn't changed, skip the expensive update
 
     def toggle_professional_rendering(self, enabled: bool = None):
-        """Toggle professional rendering on/off"""
-        if enabled is None:
-            self.use_professional_rendering = not self.use_professional_rendering
-        else:
-            self.use_professional_rendering = enabled
+        """Professional rendering is always enabled - this method kept for compatibility"""
+        # Professional rendering is always enabled for optimal visualization
+        self.use_professional_rendering = True
         self.update()
 
     def set_smoothing_factor(self, factor: float):

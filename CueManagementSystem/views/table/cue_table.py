@@ -1,3 +1,24 @@
+"""
+Cue Table Model and View
+========================
+
+Custom table model and view for displaying and manipulating firework cue data with drag-and-drop reordering and advanced styling.
+
+Features:
+- Custom QAbstractTableModel implementation
+- Drag-and-drop row reordering
+- Custom cell styling and colors
+- Data validation and formatting
+- Row insertion and deletion
+- Observer pattern for data changes
+- Custom delegate rendering
+- Keyboard navigation support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog, QWidget
 from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
 from PySide6.QtGui import QColor, QDropEvent, QPainter

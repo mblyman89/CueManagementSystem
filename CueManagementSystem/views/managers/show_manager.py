@@ -1,3 +1,24 @@
+"""
+Show Data Manager
+=================
+
+Manages saving, loading, exporting, and importing of firework show data in various formats (JSON, CSV).
+
+Features:
+- JSON show file save/load
+- CSV export functionality
+- CSV import with validation
+- Cue table integration
+- LED panel data management
+- File dialog integration
+- Data format conversion
+- Error handling and validation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import json
 import os
 import traceback

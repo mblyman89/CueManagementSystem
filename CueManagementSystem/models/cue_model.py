@@ -1,3 +1,23 @@
+"""
+Cue Data Model
+==============
+
+Data model for managing firework cues with observer pattern for change notifications.
+
+Features:
+- Cue dataclass definition
+- CueModel class for cue list management
+- Add, update, delete, retrieve operations
+- Observer pattern implementation
+- Change notification system
+- Data validation
+- List management
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from typing import List, Dict, Callable, Any, Optional
 from dataclasses import dataclass
 

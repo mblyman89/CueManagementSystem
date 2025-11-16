@@ -1,9 +1,22 @@
+"""
+Sample Data Utilities
+=====================
+
+Utility functions providing sample cue data for testing and development purposes.
+
+Features:
+- Sample cue data generation
+- Test data dictionary creation
+- Cue and LED panel test data
+- Development and testing support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 def get_sample_cues():
-    """
-    Returns a list of sample cue data for testing purposes.
-    Each cue contains: [cue_number, type, outputs, delay, execute_time]
-    Note: # OF OUTPUTS and DURATION are now calculated
-    """
+
     return [
         [1, "SINGLE SHOT", "1", 0.00, "0:00.00"],
         [2, "DOUBLE SHOT", "2,3", 0.00, "1:00.25"],

@@ -1,8 +1,21 @@
 """
 Preview Timeline Widget
-A clean, simple timeline control for preview playback with real-time scrubbing.
-Features: Play/Pause button, draggable playhead, time display.
-No cue markers - LED panel provides visualization.
+=======================
+
+Custom Qt widget for preview playback control featuring play/pause, scrubbing, and time display.
+
+Features:
+- Play/pause button control
+- Draggable playhead for scrubbing
+- Time position display
+- Real-time scrubbing without cue markers
+- Visual timeline representation
+- Mouse interaction handling
+- Smooth playhead animation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QPushButton, QLabel
@@ -12,15 +25,6 @@ from typing import List, Any
 
 
 class PreviewTimelineWidget(QWidget):
-    """
-    Timeline widget for preview control with real-time scrubbing
-
-    Features:
-    - Play/Pause toggle button
-    - Draggable playhead with real-time position updates
-    - Time display (current / total)
-    - Clean design without cue markers
-    """
 
     # Signals
     seek_requested = Signal(float)  # Emits time in seconds during drag

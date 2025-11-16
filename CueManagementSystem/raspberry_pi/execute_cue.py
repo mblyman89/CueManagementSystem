@@ -1,7 +1,24 @@
-#!/usr/bin/env python3
 """
-Execute a single cue on the shift registers
+Raspberry Pi Cue Execution Script
+=================================
+
+Python script for executing firework cues on Raspberry Pi hardware using shift registers. Controls GPIO pins to fire single shots, double shots, and sequential runs.
+
+Features:
+- 74HC595 shift register control
+- Single shot execution
+- Double shot execution with timing
+- Sequential run execution
+- JSON-based cue configuration
+- Precise timing control
+- GPIO pin management
+- Command-line interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import sys
 import json

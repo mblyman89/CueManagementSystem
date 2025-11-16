@@ -1,7 +1,22 @@
-#!/usr/bin/env python3
 """
-Toggle Output Enable and Serial Clear pins for shift registers
+Output Toggle Control Script
+============================
+
+Controls shift register outputs on Raspberry Pi by toggling Output Enable and Serial Clear pins.
+
+Features:
+- Output Enable pin control
+- Serial Clear pin control
+- Output enabling/disabling
+- State persistence to JSON
+- GPIO pin management
+- Command-line interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import sys
 import json

@@ -1,8 +1,20 @@
-#!/usr/bin/env python3
 """
-Python wrapper for network status checking
-This script maintains compatibility with the existing application
-while using NetworkManager for actual status checking
+Network Status Reporter
+=======================
+
+Retrieves and reports detailed network status information using nmcli including connection mode, SSID, and IP address.
+
+Features:
+- nmcli integration
+- Connection mode detection (WiFi/ad-hoc)
+- SSID retrieval
+- IP address reporting
+- Network interface status
+- Command-line output
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import subprocess

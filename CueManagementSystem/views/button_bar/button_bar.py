@@ -1,3 +1,23 @@
+"""
+Application Button Bar
+======================
+
+A horizontal scrollable button bar widget that provides application-wide controls and mode-specific button configurations.
+
+Features:
+- Horizontal scrollable layout
+- Dynamic button state management
+- Mode-specific button visibility
+- Signal emission on button clicks
+- Custom styling and appearance
+- Button enable/disable control
+- Scroll area integration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import (QWidget, QScrollArea, QHBoxLayout,
                                QSizePolicy)
 from PySide6.QtCore import Qt, Signal, QObject

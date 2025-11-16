@@ -1,3 +1,24 @@
+"""
+Application Welcome Page
+========================
+
+The initial welcome screen for CuePiShifter featuring a customizable background, application branding, and navigation buttons for different workflows.
+
+Features:
+- Customizable background image
+- Dynamic image resizing and scaling
+- Design Show workflow button
+- Load Show workflow button
+- Import Show workflow button
+- Context menu for background changes
+- Responsive layout design
+- Signal-based navigation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import os
 from pathlib import Path
 from PySide6.QtWidgets import (QWidget, QPushButton, QVBoxLayout, QHBoxLayout,

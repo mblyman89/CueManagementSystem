@@ -1,8 +1,21 @@
 """
-Connection Status Widget
+Connection Status Display Widget
+================================
 
-Displays real-time connection status with visual indicators.
-Shows connection state, last activity, and provides quick actions.
+Widget and status bar for displaying connection status with visual indicators and quick actions.
+
+Features:
+- Visual connection indicators
+- Connection details display
+- Quick reconnect action
+- Quick disconnect action
+- Color-coded status
+- Status bar integration
+- Real-time updates
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import (QWidget, QHBoxLayout, QVBoxLayout, QLabel,
@@ -11,17 +24,7 @@ from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QFont
 from datetime import datetime
 
-
 class ConnectionStatusWidget(QWidget):
-    """
-    Widget that displays connection status with visual indicators
-
-    Features:
-    - Color-coded status indicator (green=connected, red=disconnected, yellow=connecting)
-    - Connection details (host, username, last activity)
-    - Quick action buttons (reconnect, disconnect)
-    - Auto-updating status
-    """
 
     # Signals
     reconnect_requested = Signal()

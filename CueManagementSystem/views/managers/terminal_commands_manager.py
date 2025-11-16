@@ -1,6 +1,20 @@
 """
-Terminal command simulation for the EnhancedTerminal widget.
-This module provides simulated responses for common terminal commands.
+Terminal Command Simulator
+==========================
+
+Simulates macOS terminal environment by providing predefined outputs for common terminal commands.
+
+Features:
+- Command output simulation
+- Support for ls, pwd, date, ifconfig
+- cd command handling
+- echo command support
+- macOS-specific outputs
+- Testing and development support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import os

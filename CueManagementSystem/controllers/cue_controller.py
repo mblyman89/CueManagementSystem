@@ -1,3 +1,24 @@
+"""
+Cue Controller
+==============
+
+Manages creation, updating, deletion, and selection of Cue objects with validation and data conversion.
+
+Features:
+- Cue creation management
+- Cue update operations
+- Cue deletion handling
+- Cue selection tracking
+- Data conversion utilities
+- Output formatting
+- Duplicate prevention
+- Conflict detection
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from typing import List, Dict, Any, Optional
 from models.cue_model import CueModel, Cue
 

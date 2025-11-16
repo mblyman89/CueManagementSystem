@@ -1,7 +1,24 @@
-#!/usr/bin/env python3
 """
-Execute a complete show with precise timing
+Show Execution Script for Raspberry Pi
+======================================
+
+Controls series of outputs on Raspberry Pi using GPIO to execute light shows with precise timing.
+
+Features:
+- JSON configuration-based execution
+- Precise timing control
+- Single shot support
+- Double shot support
+- Run sequence support
+- GPIO pin control
+- 74HC595 shift register integration
+- Command-line interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import sys
 import json

@@ -1,11 +1,23 @@
 """
-Show Execution Manager for Large-Scale Firework Control
+Show Execution Manager
+======================
 
-This module handles:
-- Sequential execution of up to 1000 cues
-- Pause/Resume functionality
-- Progress tracking and status updates
-- Integration with GPIO controller and MQTT system
+Manages the real-time execution of firework shows on hardware, handling cue sequencing, timing, GPIO control, and MQTT communication.
+
+Features:
+- Sequential cue execution with precise timing
+- Hardware GPIO integration
+- MQTT status broadcasting
+- Pause and resume functionality
+- Progress tracking and reporting
+- Emergency stop handling
+- Cue validation and loading
+- Execution state management
+- Time-based cue triggering
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import asyncio

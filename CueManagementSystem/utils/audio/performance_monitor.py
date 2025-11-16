@@ -1,3 +1,22 @@
+"""
+Performance Monitoring Decorator
+================================
+
+Lightweight performance monitor with timing decorator for function execution and summary generation.
+
+Features:
+- Function execution timing
+- Performance statistics
+- Summary report generation
+- Decorator pattern
+- Production-ready lightweight design
+- Minimal overhead
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import time
 import functools
 import threading
@@ -7,7 +26,6 @@ import json
 
 
 class PerformanceMonitor:
-    """Lightweight performance monitor for production use"""
 
     def __init__(self):
         self.timings: Dict[str, List[float]] = {}

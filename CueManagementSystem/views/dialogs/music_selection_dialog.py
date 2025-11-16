@@ -1,3 +1,22 @@
+"""
+Music Selection Dialog
+======================
+
+Dialog for selecting music files from the library to play with preview or show.
+
+Features:
+- Music file list display
+- File selection interface
+- Preview option
+- Skip music option
+- Cancel functionality
+- User-friendly selection
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
                                QPushButton, QListWidget, QListWidgetItem)
 from PySide6.QtCore import Qt, Signal
@@ -77,7 +96,7 @@ class MusicSelectionDialog(QDialog):
         button_layout.addWidget(cancel_btn)
 
         # Select button
-        self.select_btn = QPushButton("Select & Play")
+        self.select_btn = QPushButton("Select")
         self.select_btn.clicked.connect(self._select_music)
         self.select_btn.setEnabled(False)  # Disabled until selection made
         button_layout.addWidget(self.select_btn)

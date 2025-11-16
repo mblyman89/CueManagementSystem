@@ -1,7 +1,22 @@
-#!/usr/bin/env python3
 """
-Set ARM pin state for firework control system
+Raspberry Pi Arm State Control
+==============================
+
+Script for controlling the arming state of the firework control system on Raspberry Pi hardware via GPIO pins.
+
+Features:
+- GPIO pin control for arming
+- State persistence to JSON file
+- Command-line interface
+- Arm and disarm functionality
+- Safety state management
+- Hardware interlock control
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import sys
 import json

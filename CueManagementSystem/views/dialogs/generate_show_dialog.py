@@ -1,3 +1,23 @@
+"""
+Show Generation Configuration Dialog
+====================================
+
+Dialog for configuring and generating random or musical firework shows with customizable parameters.
+
+Features:
+- Global show parameters configuration
+- Act-specific settings
+- Random show generation
+- Musical structure generation
+- Customizable timing and effects
+- Multi-act show support
+- User-friendly interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
                                QMessageBox, QSpinBox, QGroupBox, QFormLayout, QDialogButtonBox,
                                QComboBox, QGridLayout, QSlider, QTabWidget, QWidget, QCheckBox,
@@ -61,7 +81,7 @@ class RandomShowConfigDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Random Show Configuration")
+        self.setWindowTitle("Random Show Generator")
         self.resize(900, 700)  # Increased size for enhanced statistics
 
         # Initialize variables

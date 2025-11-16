@@ -1,7 +1,21 @@
-#!/usr/bin/env python3
 """
-Simple Shift Register Test Script for Raspberry Pi
-Tests shift register outputs with interactive terminal dialog
+Shift Register Interactive Test
+===============================
+
+Interactive testing script for shift register outputs on Raspberry Pi with various firing patterns.
+
+Features:
+- Single shot testing
+- Double shot testing
+- Single run sequences
+- Double run sequences
+- Configurable delays
+- Interactive command-line interface
+- GPIO pin control
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import RPi.GPIO as GPIO

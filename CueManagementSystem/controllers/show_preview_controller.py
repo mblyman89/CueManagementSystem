@@ -1,3 +1,29 @@
+"""
+Show Preview Controller
+=======================
+
+Controller for managing the preview playback of complete firework shows on the LED panel.
+This controller handles precise timing, cue sequencing, and synchronization with the
+preview animation system to provide accurate visual representation of show execution.
+
+Features:
+- Sequential cue playback with precise timing
+- Play, pause, resume, and stop controls
+- Time-based seeking and scrubbing
+- Real-time time updates (10Hz refresh rate)
+- Cue triggering at exact execution times
+- Integration with preview LED animation controller
+- Active cue tracking at any given time
+- Total show duration calculation
+- Music file synchronization support
+- Automatic LED state clearing on start
+- Pause time compensation for accurate timing
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtCore import QObject, QTimer, Signal
 from typing import List, Dict, Any
 import time
@@ -5,10 +31,6 @@ from views.led_panel.preview_led_animations import PreviewLedAnimationController
 
 
 class ShowPreviewController(QObject):
-    """
-    Controller for previewing a complete show on the LED panel
-    Handles timing and playback of cues in order
-    """
 
     # Signals
     preview_started = Signal()

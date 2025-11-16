@@ -1,3 +1,24 @@
+"""
+Waveform Analysis and Visualization Dialog
+==========================================
+
+Comprehensive dialog for displaying and interacting with music waveforms including real-time analysis and playback.
+
+Features:
+- Real-time waveform visualization
+- Background waveform analysis
+- Audio playback controls
+- Interactive zoom and pan
+- Performance monitoring
+- Beat detection display
+- Multiple rendering modes
+- Progress tracking
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import traceback
 from datetime import datetime
 import time
@@ -1005,7 +1026,7 @@ class WaveformAnalysisDialog(QDialog):
         stop.activated.connect(self._on_stop)
 
     def resize_to_screen(self) -> None:
-        """Resize dialog to optimal size based on screen dimensions"""
+        """Resize dialog to fit screen with comfortable margins"""
         from PySide6.QtWidgets import QApplication
 
         # Get primary screen
@@ -1014,21 +1035,36 @@ class WaveformAnalysisDialog(QDialog):
             screen = QApplication.screens()[0] if QApplication.screens() else None
 
         if screen:
-            # Get available geometry
+            # Get available geometry (excludes menu bar, dock, etc.)
             geometry = screen.availableGeometry()
 
-            # Use 90% of screen width and height
-            width = int(geometry.width() * 0.9)
-            height = int(geometry.height() * 0.9)
+            # Calculate maximum usable dimensions with margins
+            # Leave 40px margin on each side for better fit
+            max_width = geometry.width() - 80
+            max_height = geometry.height() - 80
+
+            # Use percentage-based sizing but cap at max dimensions
+            # This ensures dialog never exceeds screen bounds
+            width = min(int(geometry.width() * 0.85), max_width)
+            height = min(int(geometry.height() * 0.80), max_height)
+
+            # For smaller screens (laptops), use even more conservative sizing
+            if geometry.width() < 1440:  # Typical 13" laptop
+                width = min(int(geometry.width() * 0.75), max_width)
+                height = min(int(geometry.height() * 0.75), max_height)
 
             # Center the dialog
             x = geometry.x() + (geometry.width() - width) // 2
             y = geometry.y() + (geometry.height() - height) // 2
 
             self.setGeometry(x, y, width, height)
+
+            # Set minimum size to ensure usability
+            self.setMinimumSize(800, 600)
         else:
             # Fallback size if screen information is not available
-            self.resize(1024, 768)
+            self.resize(900, 650)
+            self.setMinimumSize(800, 600)
 
     def _connect_signals(self) -> None:
         """Connect all signals and slots"""
@@ -1069,15 +1105,12 @@ class WaveformAnalysisDialog(QDialog):
             self.waveform_controls_panel.smoothing_changed.connect(self.waveform_view.set_smoothing_factor)
             self.waveform_controls_panel.dynamic_range_changed.connect(self.waveform_view.set_dynamic_range_db)
             self.waveform_controls_panel.frequency_bands_changed.connect(self.waveform_view.set_frequency_bands)
-            self.waveform_controls_panel.professional_rendering_toggled.connect(
-                self.waveform_view.toggle_professional_rendering)
+            # Professional rendering is always enabled - no toggle needed
 
             # Connect beat detection signals
             self.waveform_controls_panel.analyze_file_requested.connect(self._on_analyze_file)
             self.waveform_controls_panel.manual_peak_mode_changed.connect(self._on_manual_peak_mode_changed)
             self.waveform_controls_panel.double_shot_mode_changed.connect(self._on_double_shot_mode_changed)
-            self.waveform_controls_panel.cleanup_filter_requested.connect(self._apply_cleanup_filter)
-            self.waveform_controls_panel.restore_peaks_requested.connect(self._restore_original_peaks)
 
             # Connect state management signals
             self.waveform_controls_panel.save_state_requested.connect(self.save_waveform_state)
@@ -1440,9 +1473,6 @@ class WaveformAnalysisDialog(QDialog):
         # Update controls panel peak counters
         if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel, 'update_peak_counts'):
             self.waveform_controls_panel.update_peak_counts(detected_count, custom_count, total_count)
-
-        # Update cleanup filter button state based on detected peak count
-        self._update_cleanup_filter_button_state()
 
         # Stop the update timer
         if self.peak_check_timer.isActive():
@@ -3257,161 +3287,6 @@ class WaveformAnalysisDialog(QDialog):
         except Exception as e:
             self.logger.debug(f"Error determining processing stage: {str(e)}")
             return "Processing"
-
-    def _apply_cleanup_filter(self):
-        """Apply aggressive clustering to reduce peaks to ≤1000 for complex tracks"""
-        if not self.analyzer or not hasattr(self.analyzer, 'get_peak_data'):
-            self.logger.warning("No analyzer available for cleanup filtering")
-            return
-
-        try:
-            # Get current peak count
-            current_peaks = self.analyzer.get_peak_data()
-            if not current_peaks:
-                self.logger.warning("No peaks available for cleanup filtering")
-                return
-
-            peak_count = len(current_peaks)
-            self.logger.info(f"Starting cleanup filter with {peak_count} peaks")
-
-            # Store original peaks for restore functionality
-            if not hasattr(self.analyzer, '_original_peaks_backup'):
-                self.analyzer._original_peaks_backup = current_peaks.copy()
-
-            # Apply aggressive clustering
-            target_count = 1000
-            clustered_peaks = self.analyzer.apply_aggressive_clustering(target_peak_count=target_count)
-
-            if clustered_peaks:
-                # Update analyzer with clustered peaks
-                self.analyzer._set_clustered_peaks(clustered_peaks)
-
-                # Update UI
-                new_count = len(clustered_peaks)
-                self.logger.info(f"Cleanup filter complete: {peak_count} → {new_count} peaks")
-
-                # Update peak counters
-                manual_count = len(self.waveform_view.manual_peaks) if hasattr(self.waveform_view,
-                                                                               'manual_peaks') and self.waveform_view.manual_peaks else 0
-                self._update_all_peak_counters(len(self.analyzer.peaks), manual_count)
-
-                # Update waveform display
-                if hasattr(self.waveform_view, 'update_peaks'):
-                    self.waveform_view.update_peaks()
-                else:
-                    self.waveform_view.update()
-
-                # Enable restore button, update cleanup button (these are in the controls panel)
-                if hasattr(self, 'waveform_controls_panel'):
-                    if hasattr(self.waveform_controls_panel, 'restore_peaks_btn'):
-                        self.waveform_controls_panel.restore_peaks_btn.setEnabled(True)
-                    if hasattr(self.waveform_controls_panel, 'cleanup_filter_btn'):
-                        self.waveform_controls_panel.cleanup_filter_btn.setText(
-                            f"🔧 Cleanup Applied ({new_count} peaks)")
-                        self.waveform_controls_panel.cleanup_filter_btn.setEnabled(False)
-
-                # Update controls panel buttons
-                if hasattr(self, 'waveform_controls_panel'):
-                    if hasattr(self.waveform_controls_panel, 'set_restore_peaks_enabled'):
-                        self.waveform_controls_panel.set_restore_peaks_enabled(True)
-                    if hasattr(self.waveform_controls_panel, 'set_cleanup_filter_enabled'):
-                        self.waveform_controls_panel.set_cleanup_filter_enabled(False)
-
-                # Show success message
-                self._show_status_message(f"✅ Cleanup Filter: {peak_count} → {new_count} peaks", 3000)
-
-            else:
-                self.logger.error("Cleanup filtering failed - no peaks returned")
-                self._show_status_message("❌ Cleanup filtering failed", 3000)
-
-        except Exception as e:
-            self.logger.error(f"Error during cleanup filtering: {str(e)}", exc_info=True)
-            self._show_status_message(f"❌ Cleanup error: {str(e)}", 5000)
-
-    def _restore_original_peaks(self):
-        """Restore original peaks before cleanup filtering"""
-        if not self.analyzer or not hasattr(self.analyzer, '_original_peaks_backup'):
-            self.logger.warning("No original peaks backup available for restore")
-            return
-
-        try:
-            # Restore original peaks
-            original_peaks = self.analyzer._original_peaks_backup
-            self.analyzer._set_clustered_peaks(original_peaks)
-
-            original_count = len(original_peaks)
-            self.logger.info(f"Restored {original_count} original peaks")
-
-            # Update UI
-            manual_count = len(self.waveform_view.manual_peaks) if hasattr(self.waveform_view,
-                                                                           'manual_peaks') and self.waveform_view.manual_peaks else 0
-            self._update_all_peak_counters(len(self.analyzer.peaks), manual_count)
-
-            # Update waveform display
-            if hasattr(self.waveform_view, 'update_peaks'):
-                self.waveform_view.update_peaks()
-            else:
-                self.waveform_view.update()
-
-            # Update button states (these are in the controls panel)
-            if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel, 'restore_peaks_btn'):
-                self.waveform_controls_panel.restore_peaks_btn.setEnabled(False)
-
-            # Update controls panel button
-            if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
-                                                                    'set_restore_peaks_enabled'):
-                self.waveform_controls_panel.set_restore_peaks_enabled(False)
-
-            self._update_cleanup_filter_button_state()
-
-            # Show success message
-            self._show_status_message(f"↺ Restored {original_count} original peaks", 3000)
-
-        except Exception as e:
-            self.logger.error(f"Error during peak restoration: {str(e)}", exc_info=True)
-            self._show_status_message(f"❌ Restore error: {str(e)}", 5000)
-
-    def _update_cleanup_filter_button_state(self):
-        """Update cleanup filter button state based on current peak count"""
-        try:
-            if not self.analyzer or not hasattr(self.analyzer, 'get_peak_data'):
-                return
-
-            current_peaks = self.analyzer.get_peak_data()
-            if not current_peaks:
-                return
-
-            peak_count = len(current_peaks)
-
-            if peak_count > 1000:
-                # Update cleanup button (it's in the controls panel)
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
-                                                                        'cleanup_filter_btn'):
-                    self.waveform_controls_panel.cleanup_filter_btn.setEnabled(True)
-                    self.waveform_controls_panel.cleanup_filter_btn.setText(f"🔧 Cleanup Filter ({peak_count} peaks)")
-                    self.waveform_controls_panel.cleanup_filter_btn.setToolTip(
-                        f"Apply aggressive clustering to reduce {peak_count} peaks to ≤1000")
-
-                # Update controls panel button
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
-                                                                        'set_cleanup_filter_enabled'):
-                    self.waveform_controls_panel.set_cleanup_filter_enabled(True)
-            else:
-                # Update cleanup button (it's in the controls panel)
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
-                                                                        'cleanup_filter_btn'):
-                    self.waveform_controls_panel.cleanup_filter_btn.setEnabled(False)
-                    self.waveform_controls_panel.cleanup_filter_btn.setText("🔧 Cleanup Filter")
-                    self.waveform_controls_panel.cleanup_filter_btn.setToolTip(
-                        "Cleanup filter not needed (≤1000 peaks)")
-
-                # Update controls panel button
-                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
-                                                                        'set_cleanup_filter_enabled'):
-                    self.waveform_controls_panel.set_cleanup_filter_enabled(False)
-
-        except Exception as e:
-            self.logger.debug(f"Error updating cleanup filter button state: {str(e)}")
 
     def _show_status_message(self, message: str, duration: int = 2000):
         """Show a temporary status message"""

@@ -1,3 +1,22 @@
+"""
+Custom Button Widget
+====================
+
+A custom QPushButton widget with enhanced styling, state management, and visual feedback for the CuePiShifter application.
+
+Features:
+- Customizable active/inactive colors
+- Selected/unselected state management
+- Hover effects and visual feedback
+- Consistent stylesheet-based styling
+- Signal emission on state changes
+- Dynamic color updates
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QPushButton, QSizePolicy
 from PySide6.QtCore import Qt, Signal
 from utils.color_utils import lighten_color, darken_color

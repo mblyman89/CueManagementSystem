@@ -1,15 +1,28 @@
 """
-Spleeter Audio Separation Service - FIXED VERSION
-================================
+Spleeter Audio Separation Service
+==================================
 
-FIXES APPLIED:
-1. Added spleeter_arm paths to search list (Apple Silicon)
-2. Fixed command handling for "python -m spleeter" format
-3. Improved error message display from stderr
-4. Proper command splitting with shlex
+A comprehensive service for integrating Spleeter audio source separation into the
+CuePiShifter application. This service handles automatic discovery of Spleeter
+installations, background processing with progress updates, and management of
+separated audio stems for drum track analysis.
 
-Author: NinjaTeach AI Team
-Version: 1.0.1 - FIXED
+Features:
+- Auto-discovery of Spleeter installations (conda, venv, system-wide)
+- Support for both Apple Silicon (spleeter_arm) and Intel (spleeter_cpu) environments
+- Background thread processing to prevent UI blocking
+- Real-time progress updates with percentage and status messages
+- Multiple stem separation models (2stems, 4stems, 5stems)
+- Automatic drum track extraction and path resolution
+- Comprehensive error handling and validation
+- Temporary file management and cleanup
+- PyInstaller windowed app compatibility
+- Configuration persistence for discovered paths
+- Cancellation support for long-running operations
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import os

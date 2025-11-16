@@ -1,3 +1,26 @@
+"""
+System Mode Controller
+======================
+
+Manages system operation mode (simulation/hardware) and handles Raspberry Pi communication for GPIO control.
+
+Features:
+- Simulation/hardware mode switching
+- SSH connection management
+- GPIO pin control via SSH
+- Show execution management
+- Network mode switching (WiFi/ad-hoc)
+- Output enable/disable control
+- System arming control
+- Cue execution
+- Abort handling
+- Status monitoring
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import logging
 import json
 import time

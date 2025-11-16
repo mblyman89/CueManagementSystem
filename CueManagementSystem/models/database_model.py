@@ -1,4 +1,23 @@
-# models/database_model.py
+"""
+Cue Database Manager
+====================
+
+SQLite database manager for storing and retrieving cue data with full CRUD operations.
+
+Features:
+- SQLite database integration
+- Cue table creation
+- Save cue operations
+- Load cue operations
+- Delete cue operations
+- Connection management
+- Error handling
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import sqlite3
 from typing import List, Dict, Any, Optional
 import os

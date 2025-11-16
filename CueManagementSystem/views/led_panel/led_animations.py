@@ -1,3 +1,23 @@
+"""
+LED Animation Controller
+========================
+
+Manages LED animations based on predefined cues including start, stop, and update operations.
+
+Features:
+- Cue-based animation management
+- SHOT cue animations
+- RUN cue animations
+- Animation start/stop control
+- LED state updates
+- Timing-based animations
+- PySide6 integration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtCore import QTimer, QObject
 from typing import List, Dict
 

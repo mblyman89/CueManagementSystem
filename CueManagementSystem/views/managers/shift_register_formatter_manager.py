@@ -1,15 +1,20 @@
 """
-74HC595 Shift Register Data Formatter for Firework Control
+Shift Register Data Formatter
+=============================
 
-This module handles the conversion of firework cue data into properly formatted
-binary data for 74HC595 shift register chains. It provides:
+Converts firework cue data into binary format for 74HC595 shift register control.
 
-- Binary data encoding for shift register chains
-- Cue-to-output mapping with validation
-- Timing synchronization data
-- Data integrity verification (checksums)
-- Support for multiple shift register chains
-- Safety interlocks and validation
+Features:
+- Cue to binary conversion
+- 74HC595 format compatibility
+- Safety checks
+- Test pattern generation
+- Emergency stop functionality
+- Data validation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import struct

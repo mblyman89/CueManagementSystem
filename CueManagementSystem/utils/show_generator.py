@@ -1,23 +1,22 @@
 """
-Professional Firework Show Generator v5.0 - Expert Edition
-===========================================================
+Professional Firework Show Generator
+====================================
 
-A comprehensive, professional-grade firework show generator implementing
-industry best practices, extensive validation, and expert show design logic.
+Advanced show generator implementing industry best practices for creating comprehensive firework shows.
 
 Features:
-- Sequential act timing (no overlaps)
-- Professional intensity curves
-- Comprehensive validation at every step
-- Industry-standard pacing algorithms
-- Sophisticated timing zone system
-- Output usage verification
-- Duration precision control
-- Safety constraints
-- Extensive logging and debugging
+- Industry best practices implementation
+- Extensive validation
+- Expert show design logic
+- Multiple show sections (intro, buildup, climax, finale)
+- Effect sequencing
+- Timing optimization
+- Safety validation
+- Comprehensive show structure
 
-Author: NinjaTech AI Team
-Version: 5.0.0 - Professional Expert Edition
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import random

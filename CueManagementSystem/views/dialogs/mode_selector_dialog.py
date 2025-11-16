@@ -1,3 +1,23 @@
+"""
+System Mode Selector Dialog
+===========================
+
+Dialog for selecting system operation mode (simulation/hardware) and configuring Raspberry Pi connection.
+
+Features:
+- Simulation/hardware mode selection
+- Raspberry Pi connection settings
+- Enhanced terminal emulator
+- SSH capabilities
+- GPIO status monitoring
+- Connection configuration
+- Real-time status display
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import os
 import sys
 import re

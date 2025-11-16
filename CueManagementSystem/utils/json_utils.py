@@ -1,6 +1,20 @@
 """
-JSON Utilities for Waveform Analysis
-Provides comprehensive JSON serialization support for numpy types and complex objects.
+JSON Serialization Utilities
+============================
+
+Utility functions for safe JSON serialization and deserialization with support for numpy types and custom objects.
+
+Features:
+- Custom JSON encoder for numpy types
+- Complex number support
+- Custom object serialization
+- Data cleaning functions
+- JSON serializability validation
+- Comprehensive type handling
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import json

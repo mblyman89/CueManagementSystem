@@ -1,3 +1,23 @@
+"""
+Grouped LED Grid Widget
+=======================
+
+Custom Qt widget displaying LEDs in draggable, rearrangeable groups with drag-and-drop functionality.
+
+Features:
+- LED groups of 50 LEDs each
+- Drag-and-drop group rearrangement
+- Visual group borders
+- LED state management
+- Animation controller integration
+- 5x10 LED arrangement per group
+- Interactive group manipulation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import (QWidget, QGridLayout, QFrame, QSizePolicy,
                                QVBoxLayout, QHBoxLayout, QLabel, QScrollArea, QApplication)
 from PySide6.QtCore import Qt, QSize, QPoint, QRect, Signal, QMimeData, QTimer

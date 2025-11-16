@@ -1,3 +1,23 @@
+"""
+Cue Creator Dialog
+==================
+
+Dialog window for creating new cue entries with parameter validation and formatting.
+
+Features:
+- Cue number input
+- Cue type selection
+- Execution time input
+- Output settings configuration
+- Data validation
+- Table display formatting
+- User-friendly interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import traceback
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QPushButton,
                                QHBoxLayout, QWidget, QLabel, QSpinBox, QComboBox,

@@ -1,3 +1,23 @@
+"""
+Traditional LED Grid Widget
+===========================
+
+Custom Qt widget displaying a traditional grid of LEDs with state management and animations.
+
+Features:
+- 40x25 LED grid layout
+- Sequential LED numbering
+- LED state management
+- Animation support
+- Cue data integration
+- Compact display design
+- Custom painting
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget, QGridLayout, QSizePolicy
 from PySide6.QtCore import Qt, QSize
 from views.led_panel.led_widget import LedWidget

@@ -1,7 +1,22 @@
-#!/usr/bin/env python3
 """
-Emergency stop - immediately disable all outputs and disarm
+Emergency Stop Function
+=======================
+
+Critical safety function for Raspberry Pi that immediately disables all outputs and disarms the system.
+
+Features:
+- Immediate output disabling
+- System disarming
+- GPIO pin safety state setting
+- State persistence to file
+- Emergency shutdown protocol
+- Hardware safety interlock
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import sys
 import json

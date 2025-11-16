@@ -1,7 +1,21 @@
 """
-Watchdog Status Widget
+Watchdog Timer Status Widget
+============================
 
-Displays watchdog timer status in the status bar.
+Status bar widget that displays the health and status of the watchdog timer system with visual indicators.
+
+Features:
+- Real-time watchdog status display
+- Active/inactive state indication
+- Warning and critical state alerts
+- Consecutive failure tracking
+- Success rate monitoring
+- Color-coded status indicators
+- Status bar integration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import QWidget, QHBoxLayout, QLabel

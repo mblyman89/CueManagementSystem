@@ -1,7 +1,21 @@
-#!/usr/bin/env python3
 """
-Upload all Raspberry Pi scripts to the Pi via SSH
+Raspberry Pi Script Upload Utility
+==================================
+
+Uploads specified Python scripts to remote Raspberry Pi via SSH and makes them executable.
+
+Features:
+- SSH file transfer
+- Multiple script upload
+- Automatic executable permissions
+- Remote deployment
+- Error handling
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import paramiko
 import os
 import sys

@@ -1,3 +1,22 @@
+"""
+LED Panel View Manager
+======================
+
+Manages switching between traditional and grouped LED panel views and updates them with cue data.
+
+Features:
+- View mode switching (traditional/grouped)
+- Dynamic view creation and management
+- Cue data updates to LED panels
+- User interaction handling
+- View state persistence
+- Smooth view transitions
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QStackedWidget
 from PySide6.QtCore import Qt, Signal
 from views.led_panel.led_grid import LedGrid

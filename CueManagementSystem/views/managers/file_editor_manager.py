@@ -1,6 +1,20 @@
 """
-Simple file editor for use within the terminal interface.
-This provides a basic text editing experience similar to nano.
+Remote File Editor
+==================
+
+A simple text file editor with SSH integration for editing files on remote Raspberry Pi systems.
+
+Features:
+- Basic text editing functionality
+- SSH remote file handling
+- Save and quit keyboard shortcuts
+- Syntax highlighting support
+- Remote file synchronization
+- Error handling for remote operations
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import os

@@ -1,3 +1,23 @@
+"""
+Cue Editor Dialog
+=================
+
+Dialog for editing existing cue entries with validation and formatting for table display.
+
+Features:
+- Cue number editing
+- Cue type modification
+- Execution time adjustment
+- Output value editing
+- Data validation
+- Table formatting
+- User-friendly interface
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import traceback
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QPushButton,
                                QHBoxLayout, QWidget, QLabel, QSpinBox, QComboBox,

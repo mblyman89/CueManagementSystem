@@ -1,17 +1,23 @@
 """
-Enhanced Hardware Controller for SSH-based Firework Control
+Raspberry Pi Hardware Controller
+================================
 
-This module provides a comprehensive hardware controller that integrates
-SSH communication with 74HC595 shift register control for firework shows.
+Manages SSH communication with Raspberry Pi for controlling firework displays using shift registers.
 
 Features:
-- SSH-based communication with Raspberry Pi
-- 74HC595 shift register data formatting
-- Safety interlocks and emergency stop
-- Connection monitoring and diagnostics
-- Command acknowledgment system
-- Hardware status feedback
-- Comprehensive error handling
+- SSH communication management
+- 74HC595 shift register control
+- Cue execution on hardware
+- Emergency stop functionality
+- Status monitoring
+- Safety interlocks
+- Network mode switching
+- GPIO state management
+- Command execution over SSH
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import asyncio

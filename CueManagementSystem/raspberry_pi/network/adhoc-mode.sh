@@ -1,4 +1,22 @@
 #!/bin/bash
+"""
+Ad-Hoc Mode Switching Script
+============================
+Bash script to configure Raspberry Pi to operate in ad-hoc (hotspot) mode with specified SSID and IP.
+
+Features:
+- Ad-hoc network creation
+- Hotspot mode configuration
+- WiFi disconnection
+- Static IP assignment (192.168.42.1)
+- NetworkManager integration
+- Root privilege checking
+- Connection management
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
 # adhoc-mode - Switch Raspberry Pi to Ad-Hoc (Hotspot) Mode
 # Usage: sudo adhoc-mode
 

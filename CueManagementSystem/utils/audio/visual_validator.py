@@ -1,10 +1,19 @@
 """
-Visual Validator Module for WaveformAnalyzer
+Waveform Analysis Visual Validator
+==================================
 
-This module provides visual validation capabilities for the WaveformAnalyzer class.
-It allows for visual inspection and validation of waveform analysis results.
+Validates waveform analysis results by comparing peak and onset detection against actual waveform data.
 
-Author: NinjaTeach AI Team
+Features:
+- Peak detection validation
+- Onset detection validation
+- Waveform data comparison
+- Detailed validation reports
+- Metrics calculation
+- Recommendations generation
+- Quality assessment
+
+Author: Michael Lyman
 Version: 1.0.0
 License: MIT
 """

@@ -1,7 +1,23 @@
 #!/bin/bash
-# setup-network-switching.sh - Initial setup script for network mode switching
-# This script installs and configures everything needed for easy switching
-# between ad-hoc and WiFi modes on Raspberry Pi Zero W2
+"""
+Network Switching Setup Script
+==============================
+
+Initial setup script that installs and configures everything needed for switching between ad-hoc and WiFi modes.
+
+Features:
+- NetworkManager installation
+- Switching script creation
+- Script permission configuration
+- Boot behavior setup
+- Raspberry Pi Zero W2 optimization
+- OS version detection
+- Automated configuration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
 
 set -e
 

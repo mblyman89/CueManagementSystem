@@ -1,5 +1,21 @@
 """
-Enhanced Spleeter Setup Dialog with Automatic Conda + Spleeter Installation
+Spleeter Setup Configuration Dialog
+===================================
+
+Dialog for configuring Spleeter installation including automatic Conda installation or manual path selection.
+
+Features:
+- Automatic Conda installation option
+- Manual Python path selection
+- Installation progress tracking
+- Path validation
+- Configuration persistence
+- User-friendly setup wizard
+- Error handling and feedback
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,

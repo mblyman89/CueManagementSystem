@@ -1,13 +1,21 @@
 """
-Professional Waveform Controls Panel
-===================================
+Waveform Rendering Controls Panel
+=================================
 
-Advanced control panel for professional waveform rendering modes and settings.
-Provides intuitive interface for switching between different visualization modes,
-color schemes, and rendering parameters.
+Professional controls panel for configuring waveform rendering modes, color schemes, and beat detection settings.
 
-Author: Enhanced by NinjaTeach AI Team
-Version: 3.0.0 - Professional Edition
+Features:
+- Rendering mode selection
+- Color scheme customization
+- Beat detection configuration
+- State management
+- Zoom control
+- Settings persistence
+- Real-time updates
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import (
@@ -31,14 +39,12 @@ class WaveformControlsPanel(QWidget):
     smoothing_changed = Signal(float)
     dynamic_range_changed = Signal(float)
     frequency_bands_changed = Signal(int)
-    professional_rendering_toggled = Signal(bool)
+    # professional_rendering_toggled signal removed - always enabled
 
     # Beat Detection Signals
     analyze_file_requested = Signal()
     manual_peak_mode_changed = Signal(bool)
     double_shot_mode_changed = Signal(bool)
-    cleanup_filter_requested = Signal()
-    restore_peaks_requested = Signal()
 
     # State Management Signals
     save_state_requested = Signal()
@@ -84,29 +90,10 @@ class WaveformControlsPanel(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)  # Reasonable margins
 
         # Professional Rendering Controls (horizontal layout)
+        # Note: Professional rendering is always enabled for optimal visualization
         main_controls_layout = QHBoxLayout()
         main_controls_layout.setSpacing(15)  # Good spacing between sections for better distribution
         main_controls_layout.setContentsMargins(8, 8, 8, 8)  # Reasonable margins
-
-        # Professional Rendering Toggle
-        toggle_section = QVBoxLayout()
-        toggle_section.setSpacing(12)  # Further increased spacing for vertical distribution
-        toggle_label = QLabel("Professional Rendering")
-        toggle_label.setStyleSheet("font-weight: bold; font-size: 14px; color: #ffffff;")
-        toggle_section.addWidget(toggle_label)
-        self.professional_toggle = QCheckBox("Enable")
-        self.professional_toggle.setChecked(True)
-        self.professional_toggle.setStyleSheet("""
-            QCheckBox {
-                font-size: 14px;
-            }
-            QCheckBox::indicator {
-                width: 25px;
-                height: 25px;
-            }
-        """)
-        toggle_section.addWidget(self.professional_toggle)
-        main_controls_layout.addLayout(toggle_section)
 
         # Rendering Mode Section
         mode_section = QVBoxLayout()
@@ -122,7 +109,7 @@ class WaveformControlsPanel(QWidget):
         self.mode_combo.addItem("Dual Layer", WaveformRenderMode.DUAL_LAYER)
         self.mode_combo.addItem("Frequency Bands", WaveformRenderMode.FREQUENCY_BANDS)
         self.mode_combo.addItem("Envelope Follower", WaveformRenderMode.ENVELOPE_FOLLOWER)
-        self.mode_combo.setCurrentIndex(4)  # Default to Frequency Bands
+        self.mode_combo.setCurrentIndex(4)  # Default to Frequency Bands (optimal for drums)
         self.mode_combo.setMinimumWidth(150)
         self.mode_combo.setMinimumHeight(30)
         mode_section.addWidget(self.mode_combo)
@@ -143,7 +130,7 @@ class WaveformControlsPanel(QWidget):
         self.color_combo.addItem("Professional Dark", ColorScheme.PROFESSIONAL_DARK)
         self.color_combo.addItem("Studio Monitor", ColorScheme.STUDIO_MONITOR)
         self.color_combo.addItem("Vintage Analog", ColorScheme.VINTAGE_ANALOG)
-        self.color_combo.setCurrentIndex(4)  # Default to Professional Dark
+        self.color_combo.setCurrentIndex(4)  # Default to Professional Dark (best contrast)
         self.color_combo.setMinimumWidth(150)
         self.color_combo.setMinimumHeight(30)
         color_section.addWidget(self.color_combo)
@@ -160,10 +147,10 @@ class WaveformControlsPanel(QWidget):
         smoothing_controls.setSpacing(8)
         self.smoothing_slider = QSlider(Qt.Horizontal)
         self.smoothing_slider.setRange(0, 100)
-        self.smoothing_slider.setValue(0)  # 0.0 default
+        self.smoothing_slider.setValue(15)  # 0.15 default (moderate smoothing for cleaner visualization)
         self.smoothing_slider.setMinimumWidth(120)
         self.smoothing_slider.setMinimumHeight(20)
-        self.smoothing_value_label = QLabel("0.00")
+        self.smoothing_value_label = QLabel("0.15")
         self.smoothing_value_label.setMinimumWidth(35)
         self.smoothing_value_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #00ff80;")
         smoothing_controls.addWidget(self.smoothing_slider)
@@ -180,7 +167,7 @@ class WaveformControlsPanel(QWidget):
 
         self.range_spinbox = QSpinBox()
         self.range_spinbox.setRange(20, 120)
-        self.range_spinbox.setValue(40)
+        self.range_spinbox.setValue(60)  # 60 dB (professional standard)
         self.range_spinbox.setSuffix(" dB")
         self.range_spinbox.setMinimumWidth(70)
         self.range_spinbox.setMinimumHeight(25)
@@ -196,7 +183,7 @@ class WaveformControlsPanel(QWidget):
 
         self.bands_spinbox = QSpinBox()
         self.bands_spinbox.setRange(4, 32)
-        self.bands_spinbox.setValue(8)
+        self.bands_spinbox.setValue(12)  # 12 bands (better frequency resolution for drums)
         self.bands_spinbox.setMinimumWidth(55)
         self.bands_spinbox.setMinimumHeight(25)
         bands_section.addWidget(self.bands_spinbox)
@@ -259,7 +246,7 @@ class WaveformControlsPanel(QWidget):
 
     def _connect_signals(self):
         """Connect widget signals to handlers"""
-        self.professional_toggle.toggled.connect(self.professional_rendering_toggled.emit)
+        # Professional rendering toggle removed - always enabled
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
         self.color_combo.currentIndexChanged.connect(self._on_color_changed)
         self.smoothing_slider.valueChanged.connect(self._on_smoothing_changed)
@@ -290,10 +277,6 @@ class WaveformControlsPanel(QWidget):
             self.double_shot_checkbox.toggled.connect(self._on_double_shot_toggled)
             # Keep stateChanged as backup
             self.double_shot_checkbox.stateChanged.connect(self._on_double_shot_changed)
-        if hasattr(self, 'cleanup_filter_btn'):
-            self.cleanup_filter_btn.clicked.connect(self.cleanup_filter_requested.emit)
-        if hasattr(self, 'restore_peaks_btn'):
-            self.restore_peaks_btn.clicked.connect(self.restore_peaks_requested.emit)
         if hasattr(self, 'save_state_btn'):
             self.save_state_btn.clicked.connect(self.save_state_requested.emit)
         if hasattr(self, 'load_state_btn'):
@@ -451,60 +434,60 @@ class WaveformControlsPanel(QWidget):
         self._debounce_timer.start(self._debounce_delay)
 
     def _apply_studio_preset(self):
-        """Apply studio monitoring preset with batched updates"""
+        """Apply studio monitoring preset - Professional monitoring with accurate level representation"""
         # Temporarily disable signals to avoid multiple updates
         self._disable_signals()
 
-        self.mode_combo.setCurrentIndex(1)  # RMS Envelope
-        self.color_combo.setCurrentIndex(5)  # Studio Monitor
-        self.smoothing_slider.setValue(5)  # Low smoothing
-        self.range_spinbox.setValue(80)  # High dynamic range
-        self.bands_spinbox.setValue(12)  # More frequency bands
+        self.mode_combo.setCurrentIndex(1)  # RMS Envelope (accurate level metering)
+        self.color_combo.setCurrentIndex(5)  # Studio Monitor (green/yellow/red VU meters)
+        self.smoothing_slider.setValue(10)  # 0.10 smoothing (minimal, professional)
+        self.range_spinbox.setValue(60)  # 60 dB (professional standard)
+        self.bands_spinbox.setValue(8)  # 8 bands (standard monitoring)
 
         # Re-enable signals and emit all changes at once
         self._enable_signals()
         self._emit_all_current_values()
 
     def _apply_music_preset(self):
-        """Apply music visualization preset with batched updates"""
+        """Apply music visualization preset - Optimized for musical content and mixing"""
         # Temporarily disable signals to avoid multiple updates
         self._disable_signals()
 
-        self.mode_combo.setCurrentIndex(2)  # Spectral Color
-        self.color_combo.setCurrentIndex(1)  # Spectral Rainbow
-        self.smoothing_slider.setValue(15)  # Medium smoothing
-        self.range_spinbox.setValue(60)  # Standard dynamic range
-        self.bands_spinbox.setValue(8)  # Standard frequency bands
+        self.mode_combo.setCurrentIndex(4)  # Frequency Bands (excellent for music/drums)
+        self.color_combo.setCurrentIndex(1)  # Spectral Rainbow (frequency visualization)
+        self.smoothing_slider.setValue(20)  # 0.20 smoothing (musical, smooth)
+        self.range_spinbox.setValue(70)  # 70 dB (wide dynamic range for music)
+        self.bands_spinbox.setValue(16)  # 16 bands (detailed frequency resolution)
 
         # Re-enable signals and emit all changes at once
         self._enable_signals()
         self._emit_all_current_values()
 
     def _apply_speech_preset(self):
-        """Apply speech analysis preset with batched updates"""
+        """Apply speech analysis preset - Optimized for voice/dialogue content"""
         # Temporarily disable signals to avoid multiple updates
         self._disable_signals()
 
-        self.mode_combo.setCurrentIndex(5)  # Envelope Follower
-        self.color_combo.setCurrentIndex(4)  # Professional Dark
-        self.smoothing_slider.setValue(25)  # Higher smoothing
-        self.range_spinbox.setValue(40)  # Lower dynamic range
-        self.bands_spinbox.setValue(6)  # Fewer frequency bands
+        self.mode_combo.setCurrentIndex(1)  # RMS Envelope (good for speech dynamics)
+        self.color_combo.setCurrentIndex(0)  # Classic Blue (clean, professional)
+        self.smoothing_slider.setValue(30)  # 0.30 smoothing (smooth speech contours)
+        self.range_spinbox.setValue(50)  # 50 dB (appropriate for speech)
+        self.bands_spinbox.setValue(6)  # 6 bands (speech frequency range)
 
         # Re-enable signals and emit all changes at once
         self._enable_signals()
         self._emit_all_current_values()
 
     def _apply_analysis_preset(self):
-        """Apply detailed analysis preset with batched updates"""
+        """Apply detailed analysis preset - Technical analysis, mastering, forensics"""
         # Temporarily disable signals to avoid multiple updates
         self._disable_signals()
 
-        self.mode_combo.setCurrentIndex(3)  # Dual Layer
-        self.color_combo.setCurrentIndex(3)  # Frequency Based
-        self.smoothing_slider.setValue(0)  # No smoothing
-        self.range_spinbox.setValue(100)  # Maximum dynamic range
-        self.bands_spinbox.setValue(16)  # Many frequency bands
+        self.mode_combo.setCurrentIndex(3)  # Dual Layer (transients + sustain)
+        self.color_combo.setCurrentIndex(4)  # Professional Dark (best contrast)
+        self.smoothing_slider.setValue(5)  # 0.05 smoothing (minimal, preserve detail)
+        self.range_spinbox.setValue(80)  # 80 dB (high dynamic range for analysis)
+        self.bands_spinbox.setValue(24)  # 24 bands (ultra-detailed frequency analysis)
 
         # Re-enable signals and emit all changes at once
         self._enable_signals()
@@ -602,8 +585,8 @@ class WaveformControlsPanel(QWidget):
         buttons_section = QHBoxLayout()
         buttons_section.setSpacing(10)
 
-        # ANALYZE button (twice as wide, same height as Save/Load State buttons)
-        self.analyze_button = QPushButton("ANALYZE FILE")
+        # ANALYZE button (same width as Save State button - 870px)
+        self.analyze_button = QPushButton("ANALYZE DRUM STEM")
         self.analyze_button.setStyleSheet("""
             QPushButton {
                 background-color: #e74c3c;
@@ -614,7 +597,7 @@ class WaveformControlsPanel(QWidget):
                 border: none;
                 border-radius: 3px;
                 min-height: 28px;
-                min-width: 320px;
+                min-width: 870px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
@@ -628,64 +611,6 @@ class WaveformControlsPanel(QWidget):
             }
         """)
         buttons_section.addWidget(self.analyze_button)
-
-        # Cleanup button (twice as wide, same height as Save/Load State buttons)
-        self.cleanup_filter_btn = QPushButton("🔧 Cleanup")
-        self.cleanup_filter_btn.setToolTip("Apply aggressive clustering to reduce peaks to ≤1000 for complex tracks")
-        self.cleanup_filter_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f39c12;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-                font-size: 14px;
-                min-height: 28px;
-                min-width: 320px;
-            }
-            QPushButton:hover {
-                background-color: #e67e22;
-            }
-            QPushButton:pressed {
-                background-color: #d35400;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-                color: #7f8c8d;
-            }
-        """)
-        self.cleanup_filter_btn.setEnabled(False)
-        buttons_section.addWidget(self.cleanup_filter_btn)
-
-        # Restore button (twice as wide, same height as Save/Load State buttons)
-        self.restore_peaks_btn = QPushButton("↺ Restore")
-        self.restore_peaks_btn.setToolTip("Restore original peaks before cleanup filtering")
-        self.restore_peaks_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #95a5a6;
-                color: white;
-                border: none;
-                padding: 6px 12px;
-                border-radius: 3px;
-                font-weight: bold;
-                font-size: 14px;
-                min-height: 28px;
-                min-width: 320px;
-            }
-            QPushButton:hover {
-                background-color: #7f8c8d;
-            }
-            QPushButton:pressed {
-                background-color: #6c7b7d;
-            }
-            QPushButton:disabled {
-                background-color: #bdc3c7;
-                color: #7f8c8d;
-            }
-        """)
-        self.restore_peaks_btn.setEnabled(False)
-        buttons_section.addWidget(self.restore_peaks_btn)
 
         # Add buttons section to main layout
         main_horizontal_layout.addLayout(buttons_section)
@@ -967,17 +892,6 @@ class WaveformControlsPanel(QWidget):
         self.detected_peak_count.setText(str(detected))
         self.custom_peak_count.setText(str(custom))
         self.total_peak_count.setText(str(total))
-
-        # Enable/disable cleanup filter based on total peaks
-        self.cleanup_filter_btn.setEnabled(total > 1000)
-
-    def set_cleanup_filter_enabled(self, enabled: bool):
-        """Enable/disable cleanup filter button"""
-        self.cleanup_filter_btn.setEnabled(enabled)
-
-    def set_restore_peaks_enabled(self, enabled: bool):
-        """Enable/disable restore peaks button"""
-        self.restore_peaks_btn.setEnabled(enabled)
 
     def _create_zoom_controls_group(self) -> QGroupBox:
         """Create the zoom controls group with compact horizontal layout"""

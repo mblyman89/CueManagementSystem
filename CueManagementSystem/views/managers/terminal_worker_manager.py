@@ -1,7 +1,20 @@
 """
-Terminal Worker Thread
+SSH Terminal Worker Threads
+===========================
 
-Handles SSH operations in a background thread to prevent GUI blocking.
+Background worker threads for handling SSH connections and command execution without blocking the GUI.
+
+Features:
+- SSH connection worker thread
+- Command execution worker thread
+- Non-blocking operations
+- Signal-based result communication
+- Error handling and reporting
+- Thread safety
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtCore import QThread, Signal

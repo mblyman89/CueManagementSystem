@@ -1,19 +1,19 @@
 """
-Enhanced Music Analysis Dialog with Spleeter Integration
-=======================================================
+Music Analysis Configuration Dialog
+===================================
 
-This is an enhanced version of the MusicAnalysisDialog that integrates Spleeter
-audio separation capabilities. It maintains backward compatibility while adding
-the ability to automatically separate audio into stems and analyze the drum track.
+Dialog for configuring Spleeter audio separation settings for drum track extraction and analysis.
 
-Key Features:
-- Automatic audio separation using Spleeter
-- Drum track extraction and analysis
-- Progress tracking and user feedback
-- Graceful fallback to original workflow
-- Error handling and recovery
+Features:
+- Spleeter integration toggle
+- Automatic drum track selection
+- Separated stems saving option
+- Model selection (2stems, 4stems, 5stems)
+- Configuration persistence
+- User-friendly interface
+- Validation and error handling
 
-Author: NinjaTeach AI Team
+Author: Michael Lyman
 Version: 1.0.0
 License: MIT
 """

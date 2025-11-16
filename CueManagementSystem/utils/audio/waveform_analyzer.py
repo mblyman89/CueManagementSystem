@@ -1,9 +1,8 @@
-#!/usr/bin/env python3
 """
-Professional Waveform Analyzer for Drum Detection using madmom
-=============================================================
+Waveform Analyzer for Drum Detection using madmom
+=================================================
 
-A comprehensive, production-level waveform analyzer specifically designed for drum hit detection
+A comprehensive waveform analyzer specifically designed for drum hit detection
 and analysis. This analyzer incorporates madmom's state-of-the-art beat detection algorithms
 along with advanced features including:
 
@@ -20,8 +19,8 @@ along with advanced features including:
 - Comprehensive error handling and timeout protection
 - Real-time progress reporting and detailed analysis metrics
 
-Author: NinjaTeach AI Team
-Version: 3.0.0 - Enhanced Professional Edition with madmom Integration
+Author: Michael Lyman
+Version: 1.0.0
 License: MIT
 """
 import concurrent

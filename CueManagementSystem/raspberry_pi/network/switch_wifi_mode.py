@@ -1,8 +1,20 @@
-#!/usr/bin/env python3
 """
-Python wrapper for network mode switching
-This script maintains compatibility with the existing application
-while using the bash scripts for actual mode switching
+Network Mode Switching Script
+=============================
+
+Command-line interface for switching between WiFi and ad-hoc network modes with JSON status output.
+
+Features:
+- WiFi mode switching
+- Ad-hoc mode switching
+- Bash script integration
+- JSON status output
+- Command-line interface
+- Network configuration management
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import sys

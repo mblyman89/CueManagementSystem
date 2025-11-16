@@ -2,16 +2,21 @@
 Professional Waveform Renderer
 ==============================
 
-Advanced waveform rendering engine with multiple visualization modes:
-- RMS (Root Mean Square) rendering for better visual representation
-- Spectral waveform with frequency-based coloring
-- Multi-resolution rendering with adaptive detail levels
-- Professional gradient schemes and color mapping
-- Stereo channel separation and visualization
-- Dynamic range and envelope detection
+Advanced waveform rendering engine with multiple visualization modes, color schemes, and performance optimization.
 
-Author: Enhanced by NinjaTeach AI Team
-Version: 3.0.0 - Professional Edition
+Features:
+- Multiple rendering modes (RMS, spectral, dual-layer, frequency bands)
+- Customizable color schemes
+- Beat detection visualization
+- Envelope follower mode
+- Performance caching system
+- High-quality anti-aliased rendering
+- Zoom and pan support
+- Real-time waveform updates
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import numpy as np
@@ -54,19 +59,19 @@ class ColorScheme(Enum):
 
 @dataclass
 class RenderingConfig:
-    """Configuration for waveform rendering"""
-    mode: WaveformRenderMode = WaveformRenderMode.RMS_ENVELOPE
-    color_scheme: ColorScheme = ColorScheme.PROFESSIONAL_DARK
-    smoothing_factor: float = 0.1
-    dynamic_range_db: float = 60.0
-    frequency_bands: int = 8
-    rms_window_size: int = 512
-    envelope_attack: float = 0.01
-    envelope_release: float = 0.1
-    spectral_resolution: int = 1024
-    enable_antialiasing: bool = True
-    stereo_separation: bool = True
-    show_phase_correlation: bool = False
+    """Configuration for waveform rendering - Optimized defaults for drum analysis"""
+    mode: WaveformRenderMode = WaveformRenderMode.FREQUENCY_BANDS  # Optimal for drums
+    color_scheme: ColorScheme = ColorScheme.PROFESSIONAL_DARK  # Best contrast
+    smoothing_factor: float = 0.15  # Moderate smoothing for cleaner visualization
+    dynamic_range_db: float = 60.0  # Professional standard
+    frequency_bands: int = 12  # Better frequency resolution for drums
+    rms_window_size: int = 512  # Good balance for transient detection
+    envelope_attack: float = 0.005  # Fast attack for drum transients
+    envelope_release: float = 0.05  # Faster release for percussive content
+    spectral_resolution: int = 2048  # Higher resolution for better frequency detail
+    enable_antialiasing: bool = True  # Smooth, professional rendering
+    stereo_separation: bool = True  # Visualize stereo field
+    show_phase_correlation: bool = False  # Not needed for drums
 
 
 class ProfessionalWaveformRenderer:

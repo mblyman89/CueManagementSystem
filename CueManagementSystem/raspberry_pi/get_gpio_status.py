@@ -1,8 +1,23 @@
-#!/usr/bin/env python3
 """
-Get current GPIO pin states by reading the state file
-The state is maintained by toggle_outputs.py and set_arm_state.py
+GPIO Status Reporter
+====================
+
+Retrieves and formats current GPIO pin states from JSON state file for GUI display.
+
+Features:
+- GPIO state retrieval from JSON
+- Pin state formatting
+- Arm state reporting
+- Data, serial clock, register clock status
+- Output enable status
+- Serial clear status
+- GUI integration support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import sys
 import json
 import os

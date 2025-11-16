@@ -1,3 +1,27 @@
+"""
+Main Application Window
+=======================
+
+The primary application window for CuePiShifter containing all major UI components and coordinating interactions between subsystems.
+
+Features:
+- Cue table management
+- LED panel visualization
+- Button bar controls
+- Preview timeline integration
+- Music player controls
+- Waveform analysis display
+- Hardware/simulation mode switching
+- Show execution management
+- File menu operations
+- Status bar with connection info
+- Component coordination and signals
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import asyncio
 import traceback
 

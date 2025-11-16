@@ -1,3 +1,25 @@
+"""
+LED Panel View Selector Dialog
+===============================
+
+A modal dialog that allows users to select between different LED panel view modes
+for the firework control system. This dialog provides an intuitive interface for
+switching between traditional grid view and grouped view layouts.
+
+Features:
+- Radio button selection between traditional and grouped views
+- Visual descriptions of each view mode
+- Real-time view switching with signal emission
+- Modal dialog with consistent styling
+- Current view indication
+- Apply and cancel button functionality
+- Tooltips for user guidance
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QRadioButton,
                                QPushButton, QLabel, QGroupBox, QButtonGroup)
 from PySide6.QtCore import Qt, Signal

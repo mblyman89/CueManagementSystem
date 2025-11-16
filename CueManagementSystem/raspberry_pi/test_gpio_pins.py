@@ -1,7 +1,22 @@
-#!/usr/bin/env python3
 """
-Test script to check GPIO pin behavior with lgpio
+GPIO Pin Testing Script
+=======================
+
+Testing and demonstration script for Raspberry Pi GPIO pin behavior using RPi.GPIO and lgpio libraries.
+
+Features:
+- GPIO pin output testing
+- State persistence verification
+- Multiple GPIO library support
+- Pin state reading
+- High/low state setting
+- Cleanup behavior testing
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
+
 import RPi.GPIO as GPIO
 import lgpio
 import time

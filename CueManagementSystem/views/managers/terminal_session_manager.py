@@ -1,15 +1,21 @@
 """
-Terminal Session Manager
+SSH Terminal Session Manager
+============================
 
-Manages terminal sessions with proper state persistence, command history,
-and SSH connection handling. Designed to work like macOS Terminal.app.
+Manages SSH connections, command execution, and persistent command history with PTY management.
 
 Features:
-- Persistent command history across sessions
-- PTY (pseudo-terminal) support for interactive commands
-- Connection pooling and keepalive
-- Automatic reconnection
+- SSH connection handling
+- Command execution
+- Persistent command history
+- PTY management
+- Terminal emulation
 - Session state management
+- macOS Terminal.app functionality emulation
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import json

@@ -1,3 +1,23 @@
+"""
+LED Visual Widget
+=================
+
+Custom Qt widget representing a numbered LED with different states and colors based on cue type.
+
+Features:
+- Visual LED representation
+- State management (active/inactive)
+- Color coding by cue type
+- Gradient rendering
+- Number display
+- Custom painting
+- Hover effects
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QFrame
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import (QPainter, QColor, QLinearGradient, QPen,

@@ -1,3 +1,23 @@
+"""
+Music File Management Dialog
+============================
+
+Dialog for importing, managing, playing, and deleting music files in the application.
+
+Features:
+- Music file import
+- File management interface
+- Audio playback controls
+- File deletion
+- Music list display
+- Player controls integration
+- PySide6 multimedia support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from typing import Dict, Optional
 
 from PySide6.QtWidgets import (

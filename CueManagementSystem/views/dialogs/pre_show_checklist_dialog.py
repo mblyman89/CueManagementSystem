@@ -1,8 +1,22 @@
 """
 Pre-Show Safety Checklist Dialog
+================================
 
-Verifies all safety requirements before allowing show execution.
-Prevents accidents by ensuring system is properly configured.
+A critical safety dialog that performs comprehensive system checks before allowing show execution. Ensures all safety requirements are met.
+
+Features:
+- System status verification
+- GPIO pin state checking
+- Network connectivity validation
+- Hardware controller status
+- Arming state verification
+- Visual pass/fail indicators
+- Detailed status messages
+- Execution blocking on failures
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,

@@ -1,3 +1,22 @@
+"""
+Enhanced Drag-Drop Manager
+==========================
+
+Manages drag-and-drop functionality for rearranging grouped LED elements with visual feedback.
+
+Features:
+- Drag-and-drop management
+- LED group rearrangement
+- Visual feedback during drag
+- Animation support
+- Grid layout integration
+- Smooth transitions
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget, QApplication, QGraphicsDropShadowEffect
 from PySide6.QtCore import Qt, QPoint, QRect, QSize, QPropertyAnimation, QEasingCurve, QParallelAnimationGroup, Signal, \
     QObject, QTimer, QMimeData

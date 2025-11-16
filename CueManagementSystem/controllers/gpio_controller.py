@@ -1,12 +1,22 @@
 """
-GPIO Controller for Large-Scale Firework Control System
+GPIO Controller for Firework System
+===================================
 
-This module handles GPIO control for:
-- 5 chains of 25 shift registers (1000 outputs total)
-- Output Enable (OE) pins for each chain
-- Serial Clear (SRCLR) pins for each chain
-- Arm control pin
-- WiFi/Adhoc mode switching
+Comprehensive GPIO controller managing output enable, serial clear, arming, and system states.
+
+Features:
+- GPIO pin configuration
+- State management
+- Output enable control
+- Serial clear control
+- Arming control
+- System state tracking
+- Safety interlocks
+- Large-scale firework system support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import json

@@ -1,3 +1,23 @@
+"""
+Music Library Manager
+=====================
+
+Manages the music library including importing, deleting, previewing, and controlling playback of music files.
+
+Features:
+- Music file importing
+- Library management
+- File deletion
+- Audio preview playback
+- Playback controls (play, pause, stop)
+- PySide6 multimedia integration
+- File format support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import os
 import shutil
 from pathlib import Path

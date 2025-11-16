@@ -1,6 +1,20 @@
 """
-Configuration Manager for CuePi
-Handles persistent storage of user preferences and settings
+Application Configuration Manager
+=================================
+
+Manages loading, saving, and accessing user preferences and settings stored in JSON.
+
+Features:
+- JSON configuration file handling
+- Settings persistence
+- User preferences management
+- Configuration loading
+- Configuration saving
+- Default value handling
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import os

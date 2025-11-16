@@ -1,3 +1,26 @@
+"""
+CuePiShifter Application Entry Point
+=====================================
+
+Main application entry point for the CuePiShifter firework control system.
+This module initializes the Qt application, sets up logging, configures
+platform-specific settings (especially for macOS), and manages the application
+lifecycle including the welcome page and main window transitions.
+
+Features:
+- Asyncio event loop integration with Qt
+- Comprehensive logging to desktop log files
+- macOS-specific application name configuration
+- Welcome page with design/load/import options
+- Smooth transition to main application window
+- Organization and domain metadata setup
+- PyObjC integration for native macOS menu bar naming
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 import sys
 import asyncio
 import os

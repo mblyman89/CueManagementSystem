@@ -1,3 +1,23 @@
+"""
+Show Generation Enumerations
+============================
+
+Defines enumerations for firework show generation including sections, effects, styles, rhythms, and complexity levels.
+
+Features:
+- Show section definitions (intro, buildup, climax, finale)
+- Effect sequence patterns
+- Show style categories
+- Rhythm pattern definitions
+- Complexity level settings
+- Type-safe show configuration
+- Enhanced show generation support
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from enum import Enum
 
 class ShowSection(Enum):

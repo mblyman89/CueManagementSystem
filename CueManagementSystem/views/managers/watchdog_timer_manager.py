@@ -1,15 +1,21 @@
 """
-Watchdog Timer for Firework Control System
+Watchdog Timer Manager
+======================
 
-Monitors connection health during show execution and automatically disables
-outputs if connection is lost for an extended period.
+Monitors connection health and automatically disables outputs if connection is lost for a specified duration.
 
 Features:
-- Periodic connection health checks (configurable interval)
-- Auto-disable outputs after connection timeout
-- Event logging with timestamps
-- Visual status indicators
-- Configurable thresholds
+- Connection health monitoring
+- Automatic output disabling on connection loss
+- Configurable timeout duration
+- Failure tracking and statistics
+- Success rate calculation
+- Signal emission for status updates
+- Safety interlock integration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtCore import QObject, QTimer, Signal, QThread

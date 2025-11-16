@@ -1,8 +1,21 @@
 """
-Musical Generator for Waveform Analysis Dialog
+Musical Cue Generator Widget
+============================
 
-This module provides functionality to generate cues based on detected and manual peaks
-from waveform analysis, with support for random and sequential distribution methods.
+PySide6 widget for generating musical cues from waveform peaks with various distribution options.
+
+Features:
+- Waveform peak-based cue generation
+- Random distribution mode
+- Sequential distribution mode
+- Time offset adjustment
+- Peak type selection
+- State management
+- Integration with waveform analysis
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import random

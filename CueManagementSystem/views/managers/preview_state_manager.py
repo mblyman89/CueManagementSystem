@@ -1,7 +1,21 @@
 """
 Preview State Manager
-Manages synchronization between audio playback, LED panel state, and timeline during preview.
-Handles real-time scrubbing with optimized LED state updates.
+=====================
+
+Manages synchronization between audio playback, LED panel states, and timeline position during show preview with real-time scrubbing support.
+
+Features:
+- Audio-LED synchronization
+- Real-time timeline scrubbing
+- Optimized LED state updates
+- Playback position tracking
+- State caching for performance
+- Smooth scrubbing experience
+- Multi-component coordination
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 from PySide6.QtCore import QObject, Signal

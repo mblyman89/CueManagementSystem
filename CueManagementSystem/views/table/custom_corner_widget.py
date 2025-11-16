@@ -1,12 +1,28 @@
+"""
+Custom Table Corner Widget
+==========================
+
+Custom corner widget for Qt tables that replaces the default white corner with styled dark blue rectangle.
+
+Features:
+- Custom corner widget styling
+- Dark blue background
+- Border styling
+- Visual consistency
+- Qt table integration
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
+"""
+
 from PySide6.QtWidgets import QWidget
 from PySide6.QtGui import QPainter, QColor
 from PySide6.QtCore import Qt
 
 
 class CustomCornerWidget(QWidget):
-    """
-    Custom corner widget to replace the problematic white corner button
-    """
+
 
     def __init__(self, parent=None):
         super().__init__(parent)
