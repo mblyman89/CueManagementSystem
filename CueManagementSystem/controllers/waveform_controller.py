@@ -1,21 +1,13 @@
 """
-Waveform Rendering Controls Panel
-=================================
+Professional Waveform Controls Panel
+===================================
 
-Professional controls panel for configuring waveform rendering modes, color schemes, and beat detection settings.
+Advanced control panel for professional waveform rendering modes and settings.
+Provides intuitive interface for switching between different visualization modes,
+color schemes, and rendering parameters.
 
-Features:
-- Rendering mode selection
-- Color scheme customization
-- Beat detection configuration
-- State management
-- Zoom control
-- Settings persistence
-- Real-time updates
-
-Author: Michael Lyman
-Version: 1.0.0
-License: MIT
+Author: Enhanced by NinjaTeach AI Team
+Version: 3.0.0 - Professional Edition
 """
 
 from PySide6.QtWidgets import (
@@ -597,7 +589,7 @@ class WaveformControlsPanel(QWidget):
                 border: none;
                 border-radius: 3px;
                 min-height: 28px;
-                min-width: 870px;
+                min-width: 775px;
             }
             QPushButton:hover {
                 background-color: #c0392b;

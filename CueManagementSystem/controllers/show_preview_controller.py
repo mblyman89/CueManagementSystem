@@ -31,6 +31,10 @@ from views.led_panel.preview_led_animations import PreviewLedAnimationController
 
 
 class ShowPreviewController(QObject):
+    """
+    Controller for previewing a complete show on the LED panel
+    Handles timing and playback of cues in order
+    """
 
     # Signals
     preview_started = Signal()
@@ -105,6 +109,10 @@ class ShowPreviewController(QObject):
             self.start_time -= self.elapsed_time
             self.is_paused = False
 
+        # Notify LED panel manager of preview mode
+        if hasattr(self.led_panel, 'set_preview_mode'):
+            self.led_panel.set_preview_mode(True)
+
         # Start timer
         self.is_playing = True
         self.timer.start()
@@ -136,6 +144,10 @@ class ShowPreviewController(QObject):
             if hasattr(self.led_panel, 'updateFromCueData') and self.cues:
                 # Use the original cues (not sorted) to update the LED panel
                 self.led_panel.updateFromCueData(self.cues, force_refresh=True)
+
+        # Notify LED panel manager that preview mode ended
+        if hasattr(self.led_panel, 'set_preview_mode'):
+            self.led_panel.set_preview_mode(False)
 
         self.preview_ended.emit()
 

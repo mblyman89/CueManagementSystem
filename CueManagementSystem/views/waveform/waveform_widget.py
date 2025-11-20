@@ -1,24 +1,3 @@
-"""
-Waveform Visualization Widget
-=============================
-
-Custom Qt widget for rendering and interacting with audio waveforms with advanced features.
-
-Features:
-- Optimized waveform rendering
-- Zoom and pan controls
-- Scrolling support
-- Peak visualization
-- Professional rendering modes
-- Background thread rendering
-- Performance optimization
-- Interactive controls
-
-Author: Michael Lyman
-Version: 1.0.0
-License: MIT
-"""
-
 from PySide6.QtWidgets import QWidget, QApplication, QMessageBox
 from PySide6.QtCore import Qt, Signal, QRect, QSize, QPoint, Slot, QTimer, QThread
 from PySide6.QtGui import (

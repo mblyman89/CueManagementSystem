@@ -36,6 +36,9 @@ class LedPanelManager(QWidget):
         self.current_view = "traditional"  # Default view
         self.current_cue_data = None
 
+        # Reference to preview controller (will be set by main window)
+        self.preview_controller = None
+
         # Create both LED grid views
         self.traditional_grid = None
         self.grouped_grid = None
@@ -111,8 +114,114 @@ class LedPanelManager(QWidget):
         # You could add a timer here to automatically switch back
         # or add a "Cancel Preview" button
 
+    def _capture_led_states(self, source_grid):
+        """Capture current LED states from a grid
+
+        Returns:
+            dict: Mapping of LED numbers to their state info
+        """
+        led_states = {}
+        if not source_grid:
+            return led_states
+
+        # Try to get LED states from traditional grid
+        if hasattr(source_grid, 'leds') and not hasattr(source_grid, 'led_groups'):
+            print(f"[LED_PANEL_MANAGER] Capturing from traditional grid")
+            active_count = 0
+            for led_num, led_widget in source_grid.leds.items():
+                is_active = getattr(led_widget, 'is_active', False)
+                cue_type = getattr(led_widget, 'cue_type', None)
+                led_states[led_num] = {
+                    'active': is_active,
+                    'cue_type': cue_type
+                }
+                if is_active:
+                    active_count += 1
+            print(f"[LED_PANEL_MANAGER] Captured {active_count} active LEDs from traditional grid")
+
+        # Try to get LED states from grouped grid
+        elif hasattr(source_grid, 'led_groups'):
+            print(f"[LED_PANEL_MANAGER] Capturing from grouped grid")
+            active_count = 0
+            for group in source_grid.led_groups:
+                if hasattr(group, 'leds'):
+                    for led_num, led_widget in group.leds.items():
+                        is_active = getattr(led_widget, 'is_active', False)
+                        cue_type = getattr(led_widget, 'cue_type', None)
+                        led_states[led_num] = {
+                            'active': is_active,
+                            'cue_type': cue_type
+                        }
+                        if is_active:
+                            active_count += 1
+                elif hasattr(group, 'led_numbers'):
+                    # For groups that just track LED numbers
+                    for led_num in group.led_numbers:
+                        led_states[led_num] = {
+                            'active': False,  # Default state
+                            'cue_type': None
+                        }
+            print(f"[LED_PANEL_MANAGER] Captured {active_count} active LEDs from grouped grid")
+
+        return led_states
+
+    def _apply_led_states(self, target_grid, led_states):
+        """Apply LED states to a target grid
+
+        Args:
+            target_grid: The grid to apply states to
+            led_states: Dictionary of LED states to apply
+        """
+        if not target_grid or not led_states:
+            print(
+                f"[LED_PANEL_MANAGER] _apply_led_states: target_grid={target_grid is not None}, led_states count={len(led_states) if led_states else 0}")
+            return
+
+        print(f"[LED_PANEL_MANAGER] _apply_led_states: Applying {len(led_states)} LED states")
+
+        # Apply states to traditional grid
+        if hasattr(target_grid, 'leds') and not hasattr(target_grid, 'led_groups'):
+            print(f"[LED_PANEL_MANAGER] Applying to traditional grid")
+            applied_count = 0
+            for led_num, state in led_states.items():
+                if led_num in target_grid.leds:
+                    led_widget = target_grid.leds[led_num]
+                    # Use setState method which exists on LedWidget
+                    if state['active'] and state.get('cue_type'):
+                        led_widget.setState(state.get('cue_type'))
+                        applied_count += 1
+                    elif not state['active']:
+                        led_widget.setState(None)
+            print(f"[LED_PANEL_MANAGER] Applied {applied_count} active LEDs to traditional grid")
+
+        # Apply states to grouped grid
+        elif hasattr(target_grid, 'led_groups'):
+            print(f"[LED_PANEL_MANAGER] Applying to grouped grid")
+            applied_count = 0
+            for group in target_grid.led_groups:
+                if hasattr(group, 'leds'):
+                    for led_num, led_widget in group.leds.items():
+                        if led_num in led_states:
+                            state = led_states[led_num]
+                            # Use setState method which exists on LedWidget
+                            if state['active'] and state.get('cue_type'):
+                                led_widget.setState(state.get('cue_type'))
+                                applied_count += 1
+                            elif not state['active']:
+                                led_widget.setState(None)
+            print(f"[LED_PANEL_MANAGER] Applied {applied_count} active LEDs to grouped grid")
+
     def switch_to_view(self, view_name, is_preview=False):
-        """Switch to the specified view"""
+        """Switch to the specified view while preserving LED states"""
+
+        print(f"[LED_PANEL_MANAGER] switch_to_view called: view_name={view_name}, is_preview={is_preview}")
+
+        # ===== NEW: Capture states from current grid before switching =====
+        current_grid = self.get_current_grid()
+        led_states = self._capture_led_states(current_grid)
+        print(f"[LED_PANEL_MANAGER] Captured {len(led_states)} LED states")
+
+        # Switch the view
         if view_name == "traditional":
             self.stacked_widget.setCurrentWidget(self.traditional_grid)
             self.current_view = "traditional"
@@ -120,14 +229,81 @@ class LedPanelManager(QWidget):
             self.stacked_widget.setCurrentWidget(self.grouped_grid)
             self.current_view = "grouped"
 
+        # ===== NEW: Apply captured states to the new grid =====
+        new_grid = self.get_current_grid()
+        self._apply_led_states(new_grid, led_states)
+        print(f"[LED_PANEL_MANAGER] Applied LED states to new grid")
+
         # Update view indicator (removed to save space)
         if not is_preview:
-            # Refresh current cue data in new view
-            if self.current_cue_data:
-                self.update_from_cue_data(self.current_cue_data)
+            # Check if we're in preview mode - if so, DON'T refresh from cue data
+            # as this would overwrite the preview LED states
+            in_preview_mode = self._is_in_preview_mode()
+            print(f"[LED_PANEL_MANAGER] Preview mode check: in_preview_mode={in_preview_mode}")
+
+            if not in_preview_mode:
+                # Only refresh from cue data if NOT in preview mode
+                # Refresh current cue data in new view (if available)
+                if self.current_cue_data:
+                    print(f"[LED_PANEL_MANAGER] Calling update_from_cue_data")
+                    self.update_from_cue_data(self.current_cue_data)
+            else:
+                print(f"[LED_PANEL_MANAGER] Skipping update_from_cue_data because in preview mode")
 
             # Emit view changed signal
             self.view_changed.emit(self.current_view)
+
+    def _is_in_preview_mode(self):
+        """Check if we're currently in preview mode
+
+        Returns:
+            bool: True if preview is active, False otherwise
+        """
+        print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: Checking preview mode...")
+
+        # First check if we have a direct reference to preview controller
+        if self.preview_controller:
+            print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: Found preview_controller (direct reference)")
+
+            # Check if preview is playing or paused
+            if hasattr(self.preview_controller, 'is_playing'):
+                print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: is_playing = {self.preview_controller.is_playing}")
+                if self.preview_controller.is_playing:
+                    return True
+
+            if hasattr(self.preview_controller, 'is_paused'):
+                print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: is_paused = {self.preview_controller.is_paused}")
+                if self.preview_controller.is_paused:
+                    return True
+        else:
+            print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: No direct preview_controller reference")
+
+            # Fallback: try to get it from parent
+            if hasattr(self, 'parent') and self.parent():
+                parent = self.parent()
+                print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: Found parent")
+
+                if hasattr(parent, 'preview_controller'):
+                    preview_controller = parent.preview_controller
+                    print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: Found preview_controller on parent")
+
+                    # Check if preview is playing or paused
+                    if hasattr(preview_controller, 'is_playing'):
+                        print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: is_playing = {preview_controller.is_playing}")
+                        if preview_controller.is_playing:
+                            return True
+
+                    if hasattr(preview_controller, 'is_paused'):
+                        print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: is_paused = {preview_controller.is_paused}")
+                        if preview_controller.is_paused:
+                            return True
+                else:
+                    print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: No preview_controller on parent")
+            else:
+                print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: No parent found")
+
+        print(f"[LED_PANEL_MANAGER] _is_in_preview_mode: Returning False")
+        return False
 
     def get_current_grid(self):
         """Get the currently active LED grid"""

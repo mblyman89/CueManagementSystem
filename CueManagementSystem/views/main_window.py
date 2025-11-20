@@ -102,6 +102,9 @@ class MainWindow(QMainWindow):
         from controllers.show_preview_controller import ShowPreviewController
         self.preview_controller = ShowPreviewController(self.led_panel)
 
+        # Set preview controller reference on LED panel manager so it can detect preview mode
+        self.led_panel.preview_controller = self.preview_controller
+
         # Create preview state manager
         self.preview_state_manager = PreviewStateManager(
             self.preview_controller,

@@ -1,24 +1,3 @@
-"""
-Waveform Analysis and Visualization Dialog
-==========================================
-
-Comprehensive dialog for displaying and interacting with music waveforms including real-time analysis and playback.
-
-Features:
-- Real-time waveform visualization
-- Background waveform analysis
-- Audio playback controls
-- Interactive zoom and pan
-- Performance monitoring
-- Beat detection display
-- Multiple rendering modes
-- Progress tracking
-
-Author: Michael Lyman
-Version: 1.0.0
-License: MIT
-"""
-
 import traceback
 from datetime import datetime
 import time
@@ -485,7 +464,7 @@ class WaveformAnalysisDialog(QDialog):
             # Re-enable the analyze button (it's in the controls panel)
             if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel, 'analyze_button'):
                 self.waveform_controls_panel.analyze_button.setEnabled(True)
-                self.waveform_controls_panel.analyze_button.setText("ANALYZE FILE")
+                self.waveform_controls_panel.analyze_button.setText("ANALYZE DRUM STEM")
 
             # Hide progress bar
             self.progress_bar.setVisible(False)
@@ -611,165 +590,74 @@ class WaveformAnalysisDialog(QDialog):
             self.logger.error(f"Error handling analysis metrics: {e}")
 
     def _show_completion_dialog(self):
-        """Show comprehensive analysis completion dialog with summary."""
+        """Show simple analysis completion message with peak count."""
         try:
-            from PySide6.QtWidgets import QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QTextEdit, QGroupBox
+            from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QPushButton
             from PySide6.QtCore import Qt
             from PySide6.QtGui import QFont
 
             if not hasattr(self, 'analyzer') or not self.analyzer:
                 return
 
-            # Create completion dialog
+            # Get peak count
+            peaks = self.analyzer.get_peak_data() if hasattr(self.analyzer, 'get_peak_data') else []
+            total_peaks = len(peaks)
+
+            # Create simple completion dialog
             dialog = QDialog(self)
-            dialog.setWindowTitle("🎉 Analysis Complete!")
+            dialog.setWindowTitle("✅ Analysis Complete")
             dialog.setModal(True)
-            dialog.resize(600, 500)
+            dialog.setFixedSize(400, 200)
 
             layout = QVBoxLayout(dialog)
+            layout.setSpacing(20)
+            layout.setContentsMargins(30, 30, 30, 30)
 
-            # Title
-            title_label = QLabel("🎵 Drum Track Analysis Complete!")
+            # Success icon and title
+            title_label = QLabel("✅ Analysis Complete!")
             title_font = QFont()
-            title_font.setPointSize(16)
+            title_font.setPointSize(18)
             title_font.setBold(True)
             title_label.setFont(title_font)
             title_label.setAlignment(Qt.AlignCenter)
             layout.addWidget(title_label)
 
-            # Summary statistics
-            stats_group = QGroupBox("📊 Analysis Summary")
-            stats_layout = QVBoxLayout(stats_group)
+            # Peak count message
+            peak_message = f"🥁 {total_peaks} peaks detected"
+            peak_label = QLabel(peak_message)
+            peak_font = QFont()
+            peak_font.setPointSize(14)
+            peak_label.setFont(peak_font)
+            peak_label.setAlignment(Qt.AlignCenter)
+            peak_label.setStyleSheet("color: #2ecc71; font-weight: bold;")
+            layout.addWidget(peak_label)
 
-            # Get analysis results
-            peaks = self.analyzer.get_peak_data() if hasattr(self.analyzer, 'get_peak_data') else []
-            total_peaks = len(peaks)
+            # Add stretch to push button to bottom
+            layout.addStretch()
 
-            # File information
-            file_info = f"📁 File: {self.music_file_info.get('name', 'Unknown')}\n"
-            if hasattr(self.analyzer, 'duration_seconds'):
-                duration_val = clean_data_for_json(self.analyzer.duration_seconds)
-                file_info += f"⏱️ Duration: {duration_val:.1f} seconds\n"
-            if hasattr(self.analyzer, 'sample_rate'):
-                sample_rate_val = clean_data_for_json(self.analyzer.sample_rate)
-                file_info += f"📊 Sample Rate: {sample_rate_val:,} Hz\n"
-
-            # Peak statistics
-            peak_info = f"🥁 Total Peaks Detected: {total_peaks}\n"
-            if total_peaks > 0:
-                if hasattr(self.analyzer, 'duration_seconds') and self.analyzer.duration_seconds > 0:
-                    duration_val = clean_data_for_json(self.analyzer.duration_seconds)
-                    peak_density = total_peaks / duration_val if duration_val > 0 else 0
-                    peak_info += f"📈 Peak Density: {peak_density:.1f} peaks/second\n"
-
-                # Drum type distribution (if classification was enabled)
-                if hasattr(self.analyzer, 'config') and self.analyzer.config.get('drum_classification', False):
-                    drum_types = {}
-                    for peak in peaks:
-                        if isinstance(peak, dict) and 'drum_type' in peak:
-                            drum_type = peak['drum_type']
-                            drum_types[drum_type] = drum_types.get(drum_type, 0) + 1
-
-                    if drum_types:
-                        peak_info += "\n🥁 Drum Type Distribution:\n"
-                        for drum_type, count in sorted(drum_types.items()):
-                            percentage = (count / total_peaks) * 100
-                            peak_info += f"   {drum_type}: {count} ({percentage:.1f}%)\n"
-
-            # Processing performance
-            performance_info = ""
-            if hasattr(self.analyzer, 'progress_tracker'):
-                tracker = self.analyzer.progress_tracker
-                if tracker.get('start_time'):
-                    total_time = time.time() - tracker['start_time']
-                    performance_info = f"\n⚡ Processing Performance:\n"
-                    performance_info += f"   Total Time: {total_time:.1f} seconds\n"
-
-                    if tracker.get('processing_speed', 0) > 0:
-                        speed = tracker['processing_speed']
-                        performance_info += f"   Processing Speed: {speed:,.0f} samples/second\n"
-
-                    # Stage timing breakdown
-                    stage_times = tracker.get('stage_times', {})
-                    if stage_times:
-                        performance_info += f"   Stage Breakdown:\n"
-                        for stage, duration in stage_times.items():
-                            if isinstance(duration, (int, float)) and duration > 0:
-                                performance_info += f"     {stage}: {duration:.1f}s\n"
-
-            # Quality metrics
-            quality_info = ""
-            if hasattr(self.analyzer, 'noise_floor') and hasattr(self.analyzer, 'dynamic_range'):
-                quality_info = f"\n🔍 Signal Quality:\n"
-                quality_info += f"   Noise Floor: {self.analyzer.noise_floor:.6f}\n"
-                quality_info += f"   Dynamic Range: {self.analyzer.dynamic_range:.1f} dB\n"
-
-            # Combine all information
-            summary_text = file_info + peak_info + performance_info + quality_info
-
-            summary_label = QLabel(summary_text)
-            summary_label.setWordWrap(True)
-            summary_label.setAlignment(Qt.AlignLeft)
-            stats_layout.addWidget(summary_label)
-            layout.addWidget(stats_group)
-
-            # Recommendations
-            if total_peaks > 0:
-                recommendations_group = QGroupBox("💡 Recommendations")
-                recommendations_layout = QVBoxLayout(recommendations_group)
-
-                recommendations = []
-
-                if total_peaks < 10:
-                    recommendations.append("• Consider adjusting sensitivity settings for more peak detection")
-                elif total_peaks > 1000:
-                    recommendations.append(
-                        "• Large number of peaks detected - consider filtering or adjusting thresholds")
-
-                if hasattr(self.analyzer, 'dynamic_range') and self.analyzer.dynamic_range < 30:
-                    recommendations.append("• Low dynamic range detected - consider audio quality improvement")
-
-                if peak_density > 20:
-                    recommendations.append("• High peak density - verify detection accuracy")
-                elif peak_density < 1:
-                    recommendations.append("• Low peak density - check if all drum hits were detected")
-
-                if not recommendations:
-                    recommendations.append("• Analysis results look good! Ready for LED show generation.")
-
-                rec_text = "\n".join(recommendations)
-                rec_label = QLabel(rec_text)
-                rec_label.setWordWrap(True)
-                recommendations_layout.addWidget(rec_label)
-                layout.addWidget(recommendations_group)
-
-            # Buttons
-            button_layout = QHBoxLayout()
-
-            # Generate Show button
-            generate_button = QPushButton("🎆 Generate LED Show")
-            generate_button.setStyleSheet("""
+            # OK button
+            ok_button = QPushButton("OK")
+            ok_button.setStyleSheet("""
                 QPushButton {
-                    background-color: #4CAF50;
+                    background-color: #3498db;
                     color: white;
                     border: none;
-                    padding: 10px 20px;
+                    padding: 10px 30px;
                     font-size: 14px;
                     font-weight: bold;
                     border-radius: 5px;
+                    min-width: 100px;
                 }
                 QPushButton:hover {
-                    background-color: #45a049;
+                    background-color: #2980b9;
                 }
             """)
-            generate_button.clicked.connect(lambda: (dialog.accept(), self._generate_led_show()))
-
-            # Close button
-            close_button = QPushButton("Close")
-            close_button.clicked.connect(dialog.accept)
-
-            button_layout.addWidget(generate_button)
-            button_layout.addWidget(close_button)
+            ok_button.clicked.connect(dialog.accept)
+            ok_button.setDefault(True)  # Make it respond to Enter key
+            
+            # Center the button
+            button_layout = QVBoxLayout()
+            button_layout.addWidget(ok_button, alignment=Qt.AlignCenter)
             layout.addLayout(button_layout)
 
             # Show dialog
@@ -1037,17 +925,17 @@ class WaveformAnalysisDialog(QDialog):
         if screen:
             # Get available geometry (excludes menu bar, dock, etc.)
             geometry = screen.availableGeometry()
-
+            
             # Calculate maximum usable dimensions with margins
             # Leave 40px margin on each side for better fit
             max_width = geometry.width() - 80
             max_height = geometry.height() - 80
-
+            
             # Use percentage-based sizing but cap at max dimensions
             # This ensures dialog never exceeds screen bounds
             width = min(int(geometry.width() * 0.85), max_width)
             height = min(int(geometry.height() * 0.80), max_height)
-
+            
             # For smaller screens (laptops), use even more conservative sizing
             if geometry.width() < 1440:  # Typical 13" laptop
                 width = min(int(geometry.width() * 0.75), max_width)
@@ -1058,7 +946,7 @@ class WaveformAnalysisDialog(QDialog):
             y = geometry.y() + (geometry.height() - height) // 2
 
             self.setGeometry(x, y, width, height)
-
+            
             # Set minimum size to ensure usability
             self.setMinimumSize(800, 600)
         else:
