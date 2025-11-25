@@ -46,6 +46,7 @@ import psutil  # For memory monitoring
 # Import visual validator
 try:
     from utils.audio.visual_validator import VisualValidator
+
     VISUAL_VALIDATOR_AVAILABLE = True
 except ImportError:
     VISUAL_VALIDATOR_AVAILABLE = False
@@ -139,6 +140,7 @@ except ImportError as e:
     MADMOM_AVAILABLE = False
     logger.warning(f"⚠️  madmom not available - beat detection features disabled: {e}")
     import traceback
+
     traceback.print_exc()
 
 # For PySide6 signal/slot mechanism
@@ -308,6 +310,7 @@ class Peak:
         frequency (float): Estimated frequency of the peak (Hz)
         drum_type (str): Alias for 'type' to maintain compatibility with external code
         segment (str): Amplitude segment type where the peak occurs (e.g., 'low', 'medium', 'high', 'very_high')
+        category (str): Prominence-based category (very_low, low, medium, high, very_high)
         spectral_features (Dict): Dictionary containing spectral analysis features for this peak
     """
     time: float
@@ -316,9 +319,11 @@ class Peak:
     type: str = 'generic'
     frequency: float = 0.0
     segment: str = 'medium'  # Default segment type
+    category: str = 'medium'  # Default prominence category
 
     def __init__(self, time: float, amplitude: float = 1.0, confidence: float = 1.0,
-                 type: str = 'generic', frequency: float = 0.0, segment: str = 'medium'):
+                 type: str = 'generic', frequency: float = 0.0, segment: str = 'medium',
+                 category: str = 'medium'):
         """
         Initialize a Peak object with comprehensive attributes.
 
@@ -329,6 +334,7 @@ class Peak:
             type: Type of peak (e.g., 'kick', 'snare', 'hi-hat', etc.)
             frequency: Estimated frequency of the peak (Hz)
             segment: Amplitude segment type where the peak occurs
+            category: Prominence-based category (very_low, low, medium, high, very_high)
         """
         self.time = time
         self.amplitude = amplitude
@@ -336,6 +342,7 @@ class Peak:
         self.type = type
         self.frequency = frequency
         self.segment = segment
+        self.category = category
         self._drum_type = type
 
         # Initialize spectral features dictionary
@@ -377,6 +384,19 @@ class Peak:
         """Setting segment_type also updates segment for consistency"""
         self.segment = value
 
+    @property
+    def prominence(self) -> float:
+        """
+        Calculate prominence score based on amplitude and confidence.
+
+        Prominence combines the peak's amplitude (strength) with its detection
+        confidence to provide a single metric for categorization.
+
+        Returns:
+            Prominence score (0.0 to 1.0)
+        """
+        return self.amplitude * self.confidence
+
     def set_spectral_features(self, features: Dict[str, float]) -> None:
         """
         Set spectral features for this peak.
@@ -401,6 +421,8 @@ class Peak:
             'frequency': self.frequency,
             'segment': self.segment,  # Include segment information
             'segment_type': self.segment,  # Include segment_type as an alias to segment
+            'category': self.category,  # Include prominence category
+            'prominence': self.prominence,  # Include calculated prominence score
             'spectral_features': self.spectral_features  # Include spectral features
         }
 
@@ -2893,7 +2915,8 @@ class DrumClassifier:
                                     try:
                                         # Use log-domain calculation to prevent overflow
                                         # Limit log_energy to prevent overflow in 10.0**log_energy
-                                        log_energy = min(np.log10(normalized_energy) + 2 * np.log10(max_abs), 307.0)  # 10.0**308 is max for float64
+                                        log_energy = min(np.log10(normalized_energy) + 2 * np.log10(max_abs),
+                                                         307.0)  # 10.0**308 is max for float64
                                         energy = 10.0 ** log_energy
 
                                         # Safety check for overflow
@@ -3370,7 +3393,8 @@ class WaveformAnalyzer(QObject):
             'min_peak_distance': 0.045,  # Further increased to 45ms to better reduce suspicious onsets
             'cluster_refinement_distance': 0.055,  # Further increased to 55ms for better separation of drum hits
             'aggressive_clustering': True,  # Enable aggressive post-clustering refinement
-            'onset_methods': ['energy', 'hfc', 'spectral_flux', 'complex'],  # Added 'complex' for better onset detection
+            'onset_methods': ['energy', 'hfc', 'spectral_flux', 'complex'],
+            # Added 'complex' for better onset detection
             'max_peaks': base_max_peaks,  # Will be adjusted based on file duration
             'peaks_per_minute': 95,  # Further reduced to 95 for more realistic drum patterns
 
@@ -3750,6 +3774,12 @@ class WaveformAnalyzer(QObject):
                 self._update_stage_progress('final_validation', 0.0, "✅ Final validation and sorting...")
                 self.peaks = self._validate_and_sort_peaks(final_peaks)
                 print(f"   ✅ Validation complete - {len(self.peaks)} final peaks")
+
+                # Step 7.5: Categorize peaks by prominence
+                print("\n🏷️  STEP 7.5: Categorizing peaks by prominence...")
+                self.peaks = self._categorize_peaks_by_prominence(self.peaks)
+                print(f"   ✅ Categorization complete - {len(self.peaks)} peaks categorized")
+
                 self._update_stage_progress('final_validation', 1.0,
                                             f"✅ Validation complete - {len(self.peaks)} final peaks", len(self.peaks))
 
@@ -3774,12 +3804,18 @@ class WaveformAnalyzer(QObject):
                     onset_details = validation_report.get('details', {}).get('onsets', {})
 
                     # Calculate percentages for better context
-                    peak_valid_percent = (peak_details.get('valid', 0) / peak_details.get('total', 1)) * 100 if peak_details.get('total', 0) > 0 else 0
-                    onset_valid_percent = (onset_details.get('valid', 0) / onset_details.get('total', 1)) * 100 if onset_details.get('total', 0) > 0 else 0
+                    peak_valid_percent = (peak_details.get('valid', 0) / peak_details.get('total',
+                                                                                          1)) * 100 if peak_details.get(
+                        'total', 0) > 0 else 0
+                    onset_valid_percent = (onset_details.get('valid', 0) / onset_details.get('total',
+                                                                                             1)) * 100 if onset_details.get(
+                        'total', 0) > 0 else 0
 
                     # Log detailed metrics with percentages
-                    print(f"   📊 Peak validation: {peak_details.get('valid', 0)}/{peak_details.get('total', 0)} valid peaks ({peak_valid_percent:.1f}%)")
-                    print(f"   📊 Onset validation: {onset_details.get('valid', 0)}/{onset_details.get('total', 0)} valid onsets ({onset_valid_percent:.1f}%)")
+                    print(
+                        f"   📊 Peak validation: {peak_details.get('valid', 0)}/{peak_details.get('total', 0)} valid peaks ({peak_valid_percent:.1f}%)")
+                    print(
+                        f"   📊 Onset validation: {onset_details.get('valid', 0)}/{onset_details.get('total', 0)} valid onsets ({onset_valid_percent:.1f}%)")
 
                     # Log suspicious counts for more context
                     suspicious_peaks = peak_details.get('suspicious', 0)
@@ -3793,7 +3829,8 @@ class WaveformAnalyzer(QObject):
 
                     # Print validation result with more context
                     if validation_score >= validation_threshold:
-                        print(f"   ✅ Visual validation passed with score: {validation_score:.2f} (threshold: {validation_threshold})")
+                        print(
+                            f"   ✅ Visual validation passed with score: {validation_score:.2f} (threshold: {validation_threshold})")
                         logger.info(f"Visual validation passed with score: {validation_score:.2f}")
                         if validation_score >= 0.9:
                             print(f"   🌟 Excellent analysis quality (score: {validation_score:.2f})")
@@ -3802,8 +3839,10 @@ class WaveformAnalyzer(QObject):
                         else:
                             print(f"   👍 Acceptable analysis quality (score: {validation_score:.2f})")
                     else:
-                        print(f"   ⚠️ Visual validation score below threshold: {validation_score:.2f} < {validation_threshold}")
-                        logger.warning(f"Visual validation score below threshold: {validation_score:.2f} < {validation_threshold}")
+                        print(
+                            f"   ⚠️ Visual validation score below threshold: {validation_score:.2f} < {validation_threshold}")
+                        logger.warning(
+                            f"Visual validation score below threshold: {validation_score:.2f} < {validation_threshold}")
                         print(f"   👉 Consider adjusting analysis parameters or using manual peak editing")
 
                     # Print recommendations if any
@@ -3812,11 +3851,12 @@ class WaveformAnalyzer(QObject):
                         print("   📋 Validation recommendations:")
                         logger.info(f"Validation generated {len(recommendations)} recommendations")
                         for i, rec in enumerate(recommendations):
-                            print(f"      {i+1}. {rec}")
-                            logger.info(f"Recommendation {i+1}: {rec}")
+                            print(f"      {i + 1}. {rec}")
+                            logger.info(f"Recommendation {i + 1}: {rec}")
 
                     # Add a summary line
-                    print(f"   📈 Overall validation: {validation_score:.2f} score ({peak_valid_percent:.1f}% valid peaks, {onset_valid_percent:.1f}% valid onsets)")
+                    print(
+                        f"   📈 Overall validation: {validation_score:.2f} score ({peak_valid_percent:.1f}% valid peaks, {onset_valid_percent:.1f}% valid onsets)")
                 else:
                     print("   ⏭️ Visual validation skipped (disabled or not available)")
                     logger.info("Visual validation skipped (disabled or not available)")
@@ -7082,6 +7122,83 @@ class WaveformAnalyzer(QObject):
 
         # If still tied, keep the earlier one
         return peak1.time < peak2.time
+
+    def _categorize_peaks_by_prominence(self, peaks: List[Peak]) -> List[Peak]:
+        """
+        Categorize peaks by prominence into 5 levels: very_low, low, medium, high, very_high.
+
+        Uses percentile-based thresholds for adaptive categorization that works with
+        any audio file regardless of its dynamic range.
+
+        Args:
+            peaks: List of Peak objects to categorize
+
+        Returns:
+            List of Peak objects with category field set
+        """
+        if not peaks:
+            return peaks
+
+        print(f"   🏷️  Categorizing {len(peaks)} peaks by prominence...")
+
+        # Calculate prominence scores for all peaks
+        prominence_scores = [peak.prominence for peak in peaks]
+
+        if not prominence_scores:
+            return peaks
+
+        # Calculate percentile thresholds
+        # These thresholds divide peaks into 5 equal groups
+        p20 = np.percentile(prominence_scores, 20)  # 20th percentile
+        p40 = np.percentile(prominence_scores, 40)  # 40th percentile
+        p60 = np.percentile(prominence_scores, 60)  # 60th percentile
+        p80 = np.percentile(prominence_scores, 80)  # 80th percentile
+
+        # Log threshold values for debugging
+        logger.info(f"Prominence thresholds - p20: {p20:.3f}, p40: {p40:.3f}, p60: {p60:.3f}, p80: {p80:.3f}")
+        print(f"   📊 Prominence thresholds: p20={p20:.3f}, p40={p40:.3f}, p60={p60:.3f}, p80={p80:.3f}")
+
+        # Categorize each peak based on its prominence score
+        category_counts = {
+            'very_low': 0,
+            'low': 0,
+            'medium': 0,
+            'high': 0,
+            'very_high': 0
+        }
+
+        for peak in peaks:
+            prominence = peak.prominence
+
+            if prominence < p20:
+                peak.category = 'very_low'
+            elif prominence < p40:
+                peak.category = 'low'
+            elif prominence < p60:
+                peak.category = 'medium'
+            elif prominence < p80:
+                peak.category = 'high'
+            else:
+                peak.category = 'very_high'
+
+            category_counts[peak.category] += 1
+
+        # Log categorization results
+        print(f"   ✅ Peak categorization complete:")
+        print(
+            f"      • Very Low:  {category_counts['very_low']:4d} peaks ({category_counts['very_low'] / len(peaks) * 100:.1f}%)")
+        print(
+            f"      • Low:       {category_counts['low']:4d} peaks ({category_counts['low'] / len(peaks) * 100:.1f}%)")
+        print(
+            f"      • Medium:    {category_counts['medium']:4d} peaks ({category_counts['medium'] / len(peaks) * 100:.1f}%)")
+        print(
+            f"      • High:      {category_counts['high']:4d} peaks ({category_counts['high'] / len(peaks) * 100:.1f}%)")
+        print(
+            f"      • Very High: {category_counts['very_high']:4d} peaks ({category_counts['very_high'] / len(peaks) * 100:.1f}%)")
+
+        logger.info(f"Peak categorization: {category_counts}")
+
+        return peaks
 
     def get_peak_data(self) -> List[Peak]:
         """

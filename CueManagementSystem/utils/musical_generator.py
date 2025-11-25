@@ -536,6 +536,19 @@ class MusicalGenerator(QWidget):
                 print(f"🔧 WARNING: Too many peaks ({len(analyzer_peaks)}), limiting to 10000")
                 analyzer_peaks = analyzer_peaks[:10000]
 
+            # Get max peak count from waveform view for filtering
+            max_peak_count = None
+            if self.waveform_view and hasattr(self.waveform_view, 'get_max_peak_count'):
+                max_peak_count = self.waveform_view.get_max_peak_count()
+                print(f"🔧 Max peak count: {max_peak_count}")
+
+            # Sort peaks by prominence (highest first) for top-N filtering
+            if max_peak_count is not None and max_peak_count > 0:
+                print(f"🔧 Sorting {len(analyzer_peaks)} peaks by prominence...")
+                sorted_peaks = sorted(analyzer_peaks, key=lambda p: p.prominence if hasattr(p, 'prominence') else 0, reverse=True)
+                analyzer_peaks = sorted_peaks[:max_peak_count]
+                print(f"🔧 Using top {len(analyzer_peaks)} peaks by prominence")
+
             # Convert to standard format with progress tracking
             peaks = []
             total_peaks = len(analyzer_peaks)
@@ -574,7 +587,7 @@ class MusicalGenerator(QWidget):
                     print(f"🔧 WARNING: Reached peak limit (5000), stopping processing")
                     break
 
-            print(f"🔧 Converted {len(peaks)} detected peaks to standard format")
+            print(f"🔧 Converted {len(peaks)} detected peaks to standard format (after prominence filtering)")
 
             # Filter out hidden peaks if waveform_view is available
             if self.waveform_view and hasattr(self.waveform_view, 'hidden_detected_peaks'):

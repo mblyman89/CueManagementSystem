@@ -195,6 +195,9 @@ class WaveformView(QWidget):
         self.double_shot_mode = False
         self.double_shot_peaks = set()  # Track peaks marked as double shot by their time value
 
+        # Peak count filtering
+        self.max_peak_count = None  # Maximum number of peaks to display (None = all)
+
         # Initialize colors first to ensure they're available
         self.background_color = QColor(20, 20, 25)
         self.waveform_color = QColor(65, 175, 255)
@@ -1861,7 +1864,13 @@ class WaveformView(QWidget):
         visible_start = int(self.offset * total_samples)
         visible_end = int(visible_start + rect.width() * samples_per_pixel)
 
-        # Find peaks in visible range with AGGRESSIVE QUALITY FILTERING
+        # Sort all peaks by prominence (highest first) for top-N filtering
+        if self.max_peak_count is not None and self.max_peak_count > 0:
+            # Sort by prominence and take top N
+            sorted_peaks = sorted(peaks, key=lambda p: p.prominence if hasattr(p, 'prominence') else 0, reverse=True)
+            peaks = sorted_peaks[:self.max_peak_count]
+
+        # Find peaks in visible range
         visible_range_peaks = []
         for peak in peaks:
             # Convert peak time to sample index for comparison
@@ -2059,13 +2068,16 @@ class WaveformView(QWidget):
             self._delete_manual_peak_at_index(manual_peak_index)
 
     def _is_detected_peak_at_position(self, x, y, content_rect):
-        """Check if there's a detected peak at the given position"""
-        if not self.visible_peaks:
+        """Check if there's a detected peak at the given position (checks all peaks, not just visible)"""
+        if not self.analyzer or not hasattr(self.analyzer, 'peaks') or not self.analyzer.peaks:
             return False
 
         tolerance = 10  # pixels
 
-        for i, peak in enumerate(self.visible_peaks):
+        # Get all peaks from analyzer
+        all_peaks = self.analyzer.peaks
+
+        for i, peak in enumerate(all_peaks):
             if i in self.hidden_detected_peaks:
                 continue  # Skip hidden peaks
 
@@ -2115,21 +2127,31 @@ class WaveformView(QWidget):
         return total_detected_peaks + manual_peaks
 
     def get_detected_peak_count(self) -> int:
-        """Get total number of detected peaks across entire waveform (minus hidden ones)"""
+        """Get total number of detected peaks across entire waveform (minus hidden ones and filtered by max count)"""
         if not self.show_analyzer_peaks:
             return 0
 
-        # Get total peaks from analyzer, not just visible ones
+        # Get total peaks from analyzer
         total_peaks = 0
         if self.analyzer and hasattr(self.analyzer, 'get_peak_data'):
             try:
                 all_peaks = self.analyzer.get_peak_data()
-                total_peaks = len(all_peaks) if all_peaks else 0
+                if all_peaks:
+                    # Sort by prominence (highest first)
+                    sorted_peaks = sorted(all_peaks, key=lambda p: p.prominence if hasattr(p, 'prominence') else 0,
+                                          reverse=True)
+
+                    # Apply max peak count filter
+                    if self.max_peak_count is not None and self.max_peak_count > 0:
+                        filtered_peaks = sorted_peaks[:self.max_peak_count]
+                    else:
+                        filtered_peaks = sorted_peaks
+
+                    total_peaks = len(filtered_peaks)
             except:
                 total_peaks = 0
 
-        # Subtract hidden peaks (but hidden peaks are indexed by visible peaks, so we need to be careful)
-        # For now, just return total peaks minus hidden count
+        # Subtract hidden peaks
         return max(0, total_peaks - len(self.hidden_detected_peaks))
 
     def get_manual_peak_count(self) -> int:
@@ -2463,3 +2485,27 @@ class WaveformView(QWidget):
     def get_current_color_scheme(self) -> ColorScheme:
         """Get current color scheme"""
         return self.current_color_scheme
+
+    def set_max_peak_count(self, count: int) -> None:
+        """
+        Set the maximum number of peaks to display (top N by prominence).
+
+        Args:
+            count: Maximum number of peaks to show (0 = none, None = all)
+        """
+        self.max_peak_count = count if count > 0 else 0
+        print(f"🔧 WaveformView: Max peak count set to {self.max_peak_count}")
+
+        # Update the view to reflect the new filter
+        self.update()
+
+    def get_max_peak_count(self) -> int:
+        """
+        Get the current maximum peak count setting.
+
+        Returns:
+            Maximum number of peaks to display (None = all)
+        """
+        return self.max_peak_count
+
+

@@ -417,6 +417,27 @@ class WaveformAnalysisDialog(QDialog):
 
         self.logger.info(f"Double shot mode: {'enabled' if checked else 'disabled'}")
 
+    def _on_peak_count_changed(self, count: int) -> None:
+        """
+        Handle peak count slider/spinbox change from waveform controller.
+
+        Args:
+            count: Maximum number of peaks to display
+        """
+        if not hasattr(self, 'waveform_view'):
+            return
+
+        print(f"🔧 Dialog: Peak count changed to {count}")
+
+        # Update waveform view
+        if hasattr(self.waveform_view, 'set_max_peak_count'):
+            self.waveform_view.set_max_peak_count(count)
+
+        # Update peak counts to reflect filtered peaks
+        self._force_peak_display()
+
+        self.logger.info(f"Peak count changed to: {count}")
+
     def _on_analyze_file(self):
         """Handle ANALYZE FILE button click to trigger comprehensive drum analysis."""
         if not self.analyzer:
@@ -473,6 +494,13 @@ class WaveformAnalysisDialog(QDialog):
                 # Update peak count display
                 peaks = self.analyzer.get_peak_data()
                 self._force_peak_display()
+
+                # Set peak slider range to total peaks found
+                if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
+                                                                        'set_peak_slider_range'):
+                    total_peaks = len(peaks) if peaks else 0
+                    self.waveform_controls_panel.set_peak_slider_range(total_peaks)
+                    print(f"🔧 Dialog: Set peak slider range to {total_peaks}")
 
                 # Save timestamp data for other files to use
                 self._save_timestamp_data(peaks)
@@ -654,7 +682,7 @@ class WaveformAnalysisDialog(QDialog):
             """)
             ok_button.clicked.connect(dialog.accept)
             ok_button.setDefault(True)  # Make it respond to Enter key
-            
+
             # Center the button
             button_layout = QVBoxLayout()
             button_layout.addWidget(ok_button, alignment=Qt.AlignCenter)
@@ -925,17 +953,17 @@ class WaveformAnalysisDialog(QDialog):
         if screen:
             # Get available geometry (excludes menu bar, dock, etc.)
             geometry = screen.availableGeometry()
-            
+
             # Calculate maximum usable dimensions with margins
             # Leave 40px margin on each side for better fit
             max_width = geometry.width() - 80
             max_height = geometry.height() - 80
-            
+
             # Use percentage-based sizing but cap at max dimensions
             # This ensures dialog never exceeds screen bounds
             width = min(int(geometry.width() * 0.85), max_width)
             height = min(int(geometry.height() * 0.80), max_height)
-            
+
             # For smaller screens (laptops), use even more conservative sizing
             if geometry.width() < 1440:  # Typical 13" laptop
                 width = min(int(geometry.width() * 0.75), max_width)
@@ -946,7 +974,7 @@ class WaveformAnalysisDialog(QDialog):
             y = geometry.y() + (geometry.height() - height) // 2
 
             self.setGeometry(x, y, width, height)
-            
+
             # Set minimum size to ensure usability
             self.setMinimumSize(800, 600)
         else:
@@ -999,6 +1027,9 @@ class WaveformAnalysisDialog(QDialog):
             self.waveform_controls_panel.analyze_file_requested.connect(self._on_analyze_file)
             self.waveform_controls_panel.manual_peak_mode_changed.connect(self._on_manual_peak_mode_changed)
             self.waveform_controls_panel.double_shot_mode_changed.connect(self._on_double_shot_mode_changed)
+
+            # Connect peak count signal
+            self.waveform_controls_panel.peak_count_changed.connect(self._on_peak_count_changed)
 
             # Connect state management signals
             self.waveform_controls_panel.save_state_requested.connect(self.save_waveform_state)

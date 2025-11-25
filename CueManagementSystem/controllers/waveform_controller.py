@@ -38,6 +38,9 @@ class WaveformControlsPanel(QWidget):
     manual_peak_mode_changed = Signal(bool)
     double_shot_mode_changed = Signal(bool)
 
+    # Peak Category Signals
+    peak_count_changed = Signal(int)  # number of peaks to display
+
     # State Management Signals
     save_state_requested = Signal()
     load_state_requested = Signal()
@@ -223,9 +226,9 @@ class WaveformControlsPanel(QWidget):
         advanced_layout.setSpacing(15)  # Good spacing to spread out vertically
         advanced_layout.setContentsMargins(12, 12, 12, 12)  # Reasonable margins
 
-        # Beat Detection Analysis section
-        beat_group = self._create_beat_detection_group()
-        advanced_layout.addWidget(beat_group)
+        # Beat Detection Analysis section (directly in Advanced Settings)
+        beat_controls = self._create_beat_detection_controls()
+        advanced_layout.addLayout(beat_controls)
 
         # State Management section
         state_group = self._create_state_management_group()
@@ -269,6 +272,10 @@ class WaveformControlsPanel(QWidget):
             self.double_shot_checkbox.toggled.connect(self._on_double_shot_toggled)
             # Keep stateChanged as backup
             self.double_shot_checkbox.stateChanged.connect(self._on_double_shot_changed)
+        if hasattr(self, 'peak_count_slider') and hasattr(self, 'peak_count_spinbox'):
+            # Connect slider and spinbox to stay synchronized
+            self.peak_count_slider.valueChanged.connect(self._on_slider_changed)
+            self.peak_count_spinbox.valueChanged.connect(self._on_spinbox_changed)
         if hasattr(self, 'save_state_btn'):
             self.save_state_btn.clicked.connect(self.save_state_requested.emit)
         if hasattr(self, 'load_state_btn'):
@@ -562,12 +569,11 @@ class WaveformControlsPanel(QWidget):
         if 'frequency_bands' in settings:
             self.bands_spinbox.setValue(settings['frequency_bands'])
 
-    def _create_beat_detection_group(self) -> QGroupBox:
-        """Create the beat detection analysis group with horizontal layout"""
-        beat_group = QGroupBox("Beat Detection Analysis")
-        beat_layout = QVBoxLayout(beat_group)
+    def _create_beat_detection_controls(self) -> QVBoxLayout:
+        """Create the beat detection analysis controls (no QGroupBox wrapper)"""
+        # Main vertical layout to hold everything
+        beat_layout = QVBoxLayout()
         beat_layout.setSpacing(10)
-        beat_layout.setContentsMargins(15, 15, 15, 15)
 
         # Main horizontal layout for all elements
         main_horizontal_layout = QHBoxLayout()
@@ -577,7 +583,7 @@ class WaveformControlsPanel(QWidget):
         buttons_section = QHBoxLayout()
         buttons_section.setSpacing(10)
 
-        # ANALYZE button (same width as Save State button - 870px)
+        # ANALYZE button
         self.analyze_button = QPushButton("ANALYZE DRUM STEM")
         self.analyze_button.setStyleSheet("""
             QPushButton {
@@ -589,7 +595,8 @@ class WaveformControlsPanel(QWidget):
                 border: none;
                 border-radius: 3px;
                 min-height: 28px;
-                min-width: 775px;
+                min-width: 250px;
+                max-width: 250px;
             }
             QPushButton:hover {
                 background-color: #c0392b;
@@ -602,7 +609,103 @@ class WaveformControlsPanel(QWidget):
                 color: #7f8c8d;
             }
         """)
-        buttons_section.addWidget(self.analyze_button)
+        buttons_section.addWidget(self.analyze_button, alignment=Qt.AlignVCenter)
+
+        buttons_section.addSpacing(20)
+
+        # Peak Selection Controls with label above
+        peak_controls_section = QVBoxLayout()
+        peak_controls_section.setSpacing(2)  # Reduced spacing to raise slider
+        peak_controls_section.setAlignment(Qt.AlignVCenter)
+
+        # Label above slider (with reduced margins)
+        peaks_label = QLabel("Peaks Included in Musical")
+        peaks_label.setStyleSheet("""
+            QLabel {
+                font-size: 12px;
+                font-weight: bold;
+                color: #ffffff;
+                margin-bottom: 0px;
+                padding-bottom: 0px;
+            }
+        """)
+        peaks_label.setAlignment(Qt.AlignCenter)
+        peak_controls_section.addWidget(peaks_label)
+
+        # Horizontal layout for slider and spinbox
+        slider_spinbox_layout = QHBoxLayout()
+        slider_spinbox_layout.setSpacing(10)
+        slider_spinbox_layout.setAlignment(Qt.AlignVCenter)
+
+        # Slider for peak selection (matching waveform rendering style)
+        self.peak_count_slider = QSlider(Qt.Horizontal)
+        self.peak_count_slider.setMinimum(0)
+        self.peak_count_slider.setMaximum(1000)  # Will be updated after analysis
+        self.peak_count_slider.setValue(1000)
+        self.peak_count_slider.setEnabled(False)  # Disabled until analysis
+        self.peak_count_slider.setStyleSheet("""
+            QSlider::groove:horizontal {
+                border: 1px solid #666;
+                height: 12px;
+                background: #2a2a2a;
+                border-radius: 6px;
+            }
+            QSlider::handle:horizontal {
+                background: #0078d4;
+                border: 1px solid #005a9e;
+                width: 22px;
+                margin: -6px 0;
+                border-radius: 11px;
+            }
+            QSlider::handle:horizontal:hover {
+                background: #106ebe;
+            }
+            QSlider::sub-page:horizontal {
+                background: #0078d4;
+                border: 1px solid #005a9e;
+                height: 12px;
+                border-radius: 6px;
+            }
+        """)
+        self.peak_count_slider.setMinimumWidth(600)  # Wider slider
+        self.peak_count_slider.setFixedHeight(28)  # Fixed height to match button
+        slider_spinbox_layout.addWidget(self.peak_count_slider, alignment=Qt.AlignVCenter)
+
+        # Spinbox for precise input (matching waveform rendering style)
+        self.peak_count_spinbox = QSpinBox()
+        self.peak_count_spinbox.setMinimum(0)
+        self.peak_count_spinbox.setMaximum(1000)  # Will be updated after analysis
+        self.peak_count_spinbox.setValue(1000)
+        self.peak_count_spinbox.setEnabled(False)  # Disabled until analysis
+        self.peak_count_spinbox.setStyleSheet("""
+            QSpinBox {
+                padding: 5px;
+                border: 1px solid #666;
+                border-radius: 3px;
+                background-color: #2a2a2a;
+                color: white;
+                font-size: 13px;
+                min-height: 28px;
+                max-height: 28px;
+                min-width: 80px;
+                max-width: 80px;
+            }
+            QSpinBox:focus {
+                border: 1px solid #0078d4;
+            }
+            QSpinBox::up-button, QSpinBox::down-button {
+                background-color: #3a3a3a;
+                border: 1px solid #666;
+                width: 16px;
+            }
+            QSpinBox::up-button:hover, QSpinBox::down-button:hover {
+                background-color: #4a4a4a;
+            }
+        """)
+        slider_spinbox_layout.addWidget(self.peak_count_spinbox, alignment=Qt.AlignVCenter)
+
+        peak_controls_section.addLayout(slider_spinbox_layout)
+        buttons_section.addLayout(peak_controls_section)
 
         # Add buttons section to main layout
         main_horizontal_layout.addLayout(buttons_section)
@@ -610,17 +713,27 @@ class WaveformControlsPanel(QWidget):
         # Add small spacing between buttons and checkbox
         main_horizontal_layout.addSpacing(20)
 
-        # CHECKBOX SECTION: Manual Peak and Double Shot checkboxes with labels
+        # CHECKBOX SECTION: Manual Peak and Double Shot checkboxes side by side
         checkbox_section = QHBoxLayout()
         checkbox_section.setSpacing(8)
         checkbox_section.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
 
-        # Manual checkbox (same height as buttons)
+        # Manual checkbox
         self.manual_peak_checkbox = QCheckBox()
+        self.manual_peak_checkbox.setFixedSize(28, 28)  # Match indicator size exactly
         self.manual_peak_checkbox.setStyleSheet("""
+            QCheckBox {
+                background-color: transparent;
+                border: none;
+                outline: none;
+                spacing: 0px;
+                margin: 0px;
+                padding: 0px;
+            }
             QCheckBox::indicator {
                 width: 28px;
                 height: 28px;
+                subcontrol-position: center;
             }
             QCheckBox::indicator:unchecked {
                 border: 2px solid #bdc3c7;
@@ -632,11 +745,15 @@ class WaveformControlsPanel(QWidget):
                 background-color: #27ae60;
                 border-radius: 4px;
             }
+            QCheckBox:focus {
+                outline: none;
+                border: none;
+            }
         """)
         checkbox_section.addWidget(self.manual_peak_checkbox)
 
         # Label to the right of manual checkbox
-        self.manual_label = QLabel("Add Manual Peaks Disabled")
+        self.manual_label = QLabel("Add Peaks Disabled")
         self.manual_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #3498db;")
         self.manual_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         checkbox_section.addWidget(self.manual_label)
@@ -646,10 +763,21 @@ class WaveformControlsPanel(QWidget):
 
         # Double Shot checkbox
         self.double_shot_checkbox = QCheckBox()
+        self.double_shot_checkbox.setEnabled(False)  # Disabled by default until manual peak mode is enabled
+        self.double_shot_checkbox.setFixedSize(28, 28)  # Match indicator size exactly
         self.double_shot_checkbox.setStyleSheet("""
+            QCheckBox {
+                background-color: transparent;
+                border: none;
+                outline: none;
+                spacing: 0px;
+                margin: 0px;
+                padding: 0px;
+            }
             QCheckBox::indicator {
                 width: 28px;
                 height: 28px;
+                subcontrol-position: center;
             }
             QCheckBox::indicator:unchecked {
                 border: 2px solid #bdc3c7;
@@ -661,11 +789,19 @@ class WaveformControlsPanel(QWidget):
                 background-color: #e74c3c;
                 border-radius: 4px;
             }
+            QCheckBox:disabled::indicator {
+                border: 2px solid #555;
+                background-color: #3a3a3a;
+            }
+            QCheckBox:focus {
+                outline: none;
+                border: none;
+            }
         """)
         checkbox_section.addWidget(self.double_shot_checkbox)
 
         # Label to the right of double shot checkbox
-        self.double_shot_label = QLabel("Double Shot Mode Disabled")
+        self.double_shot_label = QLabel("Double Shot Disabled")
         self.double_shot_label.setStyleSheet("font-size: 13px; font-weight: bold; color: #e74c3c;")
         self.double_shot_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         checkbox_section.addWidget(self.double_shot_label)
@@ -734,10 +870,10 @@ class WaveformControlsPanel(QWidget):
         # Add counters section to main layout
         main_horizontal_layout.addLayout(counters_section)
 
-        # Add main horizontal layout to the group
+        # Add main horizontal layout to the beat layout
         beat_layout.addLayout(main_horizontal_layout)
 
-        return beat_group
+        return beat_layout
 
     def _create_state_management_group(self) -> QGroupBox:
         """Create the state management group"""
@@ -810,11 +946,16 @@ class WaveformControlsPanel(QWidget):
 
         # Update label text based on checkbox state
         if is_checked:
-            self.manual_label.setText("Add Manual Peaks Enabled")
+            self.manual_label.setText("Add Peaks Enabled")
             print("🔧 Controls Panel: Label updated to 'Enabled'")
+            # Enable double shot checkbox when manual peak mode is enabled
+            self.double_shot_checkbox.setEnabled(True)
         else:
-            self.manual_label.setText("Add Manual Peaks Disabled")
+            self.manual_label.setText("Add Peaks Disabled")
             print("🔧 Controls Panel: Label updated to 'Disabled'")
+            # Disable and uncheck double shot checkbox when manual peak mode is disabled
+            self.double_shot_checkbox.setEnabled(False)
+            self.double_shot_checkbox.setChecked(False)
 
         # Emit the signal to notify other components
         print(f"🔧 Controls Panel: Emitting manual_peak_mode_changed signal with: {is_checked}")
@@ -826,15 +967,40 @@ class WaveformControlsPanel(QWidget):
 
         # Update label text based on checkbox state
         if checked:
-            self.manual_label.setText("Add Manual Peaks Enabled")
+            self.manual_label.setText("Add Peaks Enabled")
             print("🔧 Controls Panel: Label updated to 'Enabled' via toggled")
+            # Enable double shot checkbox when manual peak mode is enabled
+            self.double_shot_checkbox.setEnabled(True)
         else:
-            self.manual_label.setText("Add Manual Peaks Disabled")
+            self.manual_label.setText("Add Peaks Disabled")
             print("🔧 Controls Panel: Label updated to 'Disabled' via toggled")
+            # Disable and uncheck double shot checkbox when manual peak mode is disabled
+            self.double_shot_checkbox.setEnabled(False)
+            self.double_shot_checkbox.setChecked(False)
 
         # Emit the signal to notify other components
         print(f"🔧 Controls Panel: Emitting manual_peak_mode_changed signal via toggled with: {checked}")
         self.manual_peak_mode_changed.emit(checked)
+
+    def _on_slider_changed(self, value: int):
+        """Handle slider value change - update spinbox and emit signal"""
+        # Block spinbox signals to avoid circular updates
+        self.peak_count_spinbox.blockSignals(True)
+        self.peak_count_spinbox.setValue(value)
+        self.peak_count_spinbox.blockSignals(False)
+
+        # Emit signal for waveform update
+        self.peak_count_changed.emit(value)
+
+    def _on_spinbox_changed(self, value: int):
+        """Handle spinbox value change - update slider and emit signal"""
+        # Block slider signals to avoid circular updates
+        self.peak_count_slider.blockSignals(True)
+        self.peak_count_slider.setValue(value)
+        self.peak_count_slider.blockSignals(False)
+
+        # Emit signal for waveform update
+        self.peak_count_changed.emit(value)
 
     def _on_double_shot_toggled(self, checked):
         """Handle double shot mode checkbox toggle (more reliable signal)"""
@@ -842,10 +1008,10 @@ class WaveformControlsPanel(QWidget):
 
         # Update label text based on checkbox state
         if checked:
-            self.double_shot_label.setText("Double Shot Mode Enabled")
+            self.double_shot_label.setText("Double Shot Enabled")
             print("🔧 Controls Panel: Double Shot label updated to 'Enabled' via toggled")
         else:
-            self.double_shot_label.setText("Double Shot Mode Disabled")
+            self.double_shot_label.setText("Double Shot Disabled")
             print("🔧 Controls Panel: Double Shot label updated to 'Disabled' via toggled")
 
         # Emit the signal to notify other components
@@ -869,10 +1035,10 @@ class WaveformControlsPanel(QWidget):
 
         # Update label text based on checkbox state
         if is_checked:
-            self.double_shot_label.setText("Double Shot Mode Enabled")
+            self.double_shot_label.setText("Double Shot Enabled")
             print("🔧 Controls Panel: Double Shot label updated to 'Enabled'")
         else:
-            self.double_shot_label.setText("Double Shot Mode Disabled")
+            self.double_shot_label.setText("Double Shot Disabled")
             print("🔧 Controls Panel: Double Shot label updated to 'Disabled'")
 
         # Emit the signal to notify other components
@@ -884,6 +1050,25 @@ class WaveformControlsPanel(QWidget):
         self.detected_peak_count.setText(str(detected))
         self.custom_peak_count.setText(str(custom))
         self.total_peak_count.setText(str(total))
+
+    def set_peak_slider_range(self, max_peaks: int):
+        """Set the maximum range for peak slider/spinbox after analysis"""
+        if max_peaks > 0:
+            # Update slider
+            self.peak_count_slider.setMaximum(max_peaks)
+            self.peak_count_slider.setValue(max_peaks)  # Default to all peaks
+            self.peak_count_slider.setEnabled(True)
+
+            # Update spinbox
+            self.peak_count_spinbox.setMaximum(max_peaks)
+            self.peak_count_spinbox.setValue(max_peaks)  # Default to all peaks
+            self.peak_count_spinbox.setEnabled(True)
+
+            print(f"🔧 Peak slider range set to 0-{max_peaks}, default value: {max_peaks}")
+        else:
+            # No peaks, disable controls
+            self.peak_count_slider.setEnabled(False)
+            self.peak_count_spinbox.setEnabled(False)
 
     def _create_zoom_controls_group(self) -> QGroupBox:
         """Create the zoom controls group with compact horizontal layout"""
