@@ -108,9 +108,6 @@ class CueTableWidget(QWidget):
     def doubleClicked(self):
         return self.cue_table.doubleClicked
 
-    def visual_effect_configured(self):
-        return self.cue_table.visual_effect_configured
-
     def delete_selected_cue(self):
         return self.cue_table.delete_selected_cue()
 

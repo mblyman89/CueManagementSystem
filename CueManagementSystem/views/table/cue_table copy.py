@@ -19,11 +19,10 @@ Version: 1.0.0
 License: MIT
 """
 
-from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog, QWidget, QMenu
-from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex, Signal
-from PySide6.QtGui import QColor, QDropEvent, QPainter, QAction
+from PySide6.QtWidgets import QTableView, QHeaderView, QAbstractItemView, QStyleOptionHeader, QDialog, QWidget
+from PySide6.QtCore import Qt, QAbstractTableModel, QModelIndex
+from PySide6.QtGui import QColor, QDropEvent, QPainter
 from views.dialogs.cue_editor_dialog import CueEditorDialog
-from views.dialogs.excalibur_shell_selector_dialog import ExcaliburShellSelector
 
 
 class CueTableModel(QAbstractTableModel):
@@ -37,8 +36,7 @@ class CueTableModel(QAbstractTableModel):
             "OUTPUTS",
             "DELAY",
             "DURATION",
-            "EXECUTE TIME",
-            "VISUAL EFFECT"
+            "EXECUTE TIME"
         ]
         self._colors = {
             "SINGLE SHOT": QColor("#00FF00"),
@@ -115,20 +113,6 @@ class CueTableModel(QAbstractTableModel):
                     else:
                         minutes, seconds = value.split(':')
                         return f"{minutes}:{seconds}.00"
-
-                # VISUAL EFFECT (column 7)
-                elif col == 7:
-                    # Check if row has visual properties
-                    if len(self._data[row]) > 5 and self._data[row][5]:
-                        visual_props = self._data[row][5]
-                        # First try to get shell_name (new format)
-                        if isinstance(visual_props, dict) and 'shell_name' in visual_props:
-                            return visual_props['shell_name']
-                        # Fallback to effect_type (old format)
-                        elif isinstance(visual_props, dict) and 'effect_type' in visual_props:
-                            effect_name = visual_props['effect_type'].replace('_', ' ').title()
-                            return effect_name
-                    return "Not Set"
 
                 return str(self._data[row][col])
             return ""
@@ -247,21 +231,11 @@ class CueTableModel(QAbstractTableModel):
 
 
 class CueTableView(QTableView):
-    visual_effect_configured = Signal(int, dict)  # Signal emits (row_index, visual_properties)
-
     def __init__(self):
         super().__init__()
         self.model = CueTableModel()
         self.setModel(self.model)
         self.setup_ui()
-
-        # Enable context menu
-        self.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.customContextMenuRequested.connect(self.show_context_menu)
-
-        # Enable context menu for horizontal header
-        self.horizontalHeader().setContextMenuPolicy(Qt.CustomContextMenu)
-        self.horizontalHeader().customContextMenuRequested.connect(self.show_header_context_menu)
 
     def setup_ui(self):
         # Selection behavior
@@ -291,7 +265,7 @@ class CueTableView(QTableView):
 
         # Set column widths
         header = self.horizontalHeader()
-        column_widths = [80, 120, 100, 200, 80, 80, 100, 150]
+        column_widths = [80, 120, 100, 200, 80, 80, 100]
         total_width = sum(column_widths)
 
         for col, width in enumerate(column_widths):
@@ -548,242 +522,6 @@ class CueTableView(QTableView):
             return True
 
         return False
-
-    def show_context_menu(self, position):
-        """Show context menu on right-click"""
-        # Get the index at the clicked position
-        index = self.indexAt(position)
-
-        if not index.isValid():
-            return
-
-        row = index.row()
-
-        # Only show menu if clicking on a valid cue row
-        if row >= len(self.model._data):
-            return
-
-        # Create context menu
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                color: white;
-                border: 1px solid #444;
-            }
-            QMenu::item {
-                padding: 8px 25px;
-            }
-            QMenu::item:selected {
-                background-color: #4CAF50;
-            }
-        """)
-
-        # Add "Configure Visual Effects" action
-        configure_action = QAction("Configure Visual Effects", self)
-        configure_action.triggered.connect(lambda: self.open_effects_dialog(row))
-        menu.addAction(configure_action)
-
-        # Add separator
-        menu.addSeparator()
-
-        # Add "Clear Visual Effects" action (only if effects are set)
-        if len(self.model._data[row]) > 5 and self.model._data[row][5]:
-            clear_action = QAction("Clear Visual Effects", self)
-            clear_action.triggered.connect(lambda: self.clear_visual_effects(row))
-            menu.addAction(clear_action)
-
-        # Show the menu at the cursor position
-        menu.exec(self.viewport().mapToGlobal(position))
-
-    def open_effects_dialog(self, row):
-        """Open the Excalibur shell selector dialog for a specific row"""
-        if row >= len(self.model._data):
-            return
-
-        # Get cue data
-        cue_row = self.model._data[row]
-        cue_data = {
-            'cue_number': cue_row[0],
-            'cue_type': cue_row[1],
-            'outputs': cue_row[2],
-            'delay': cue_row[3],
-            'execute_time': cue_row[4]
-        }
-
-        # Add existing visual properties if available
-        if len(cue_row) > 5 and cue_row[5]:
-            cue_data['visual_properties'] = cue_row[5]
-
-        # Create and show the simplified Excalibur shell selector
-        dialog = ExcaliburShellSelector(parent=self, cue_data=cue_data)
-
-        # Connect the signal to handle the result
-        dialog.shell_selected.connect(lambda props: self.apply_visual_effects(row, props))
-
-        dialog.exec()
-
-    def apply_visual_effects(self, row, visual_properties):
-        """Apply visual effects configuration to a cue"""
-        if row >= len(self.model._data):
-            return
-
-        # Ensure the row has enough elements
-        while len(self.model._data[row]) < 6:
-            self.model._data[row].append(None)
-
-        # Store visual properties in the 6th column (index 5)
-        self.model._data[row][5] = visual_properties
-
-        # Emit signal for external listeners
-        self.visual_effect_configured.emit(row, visual_properties)
-
-        # Update the view
-        self.model.layoutChanged.emit()
-
-    def clear_visual_effects(self, row):
-        """Clear visual effects from a cue"""
-        if row >= len(self.model._data):
-            return
-
-        if len(self.model._data[row]) > 5:
-            self.model._data[row][5] = None
-
-        # Update the view
-        self.model.layoutChanged.emit()
-
-    def show_header_context_menu(self, position):
-        """Show context menu when right-clicking on column header"""
-        # Get the column index at the clicked position
-        column = self.horizontalHeader().logicalIndexAt(position)
-
-        # Only show menu if clicking on the "VISUAL EFFECT" column (index 7)
-        if column != 7:
-            return
-
-        # Create context menu
-        menu = QMenu(self)
-        menu.setStyleSheet("""
-            QMenu {
-                background-color: #2d2d2d;
-                color: white;
-                border: 1px solid #444;
-            }
-            QMenu::item {
-                padding: 8px 25px;
-            }
-            QMenu::item:selected {
-                background-color: #4CAF50;
-            }
-        """)
-
-        # Add "Assign Random Effects to All Cues" action
-        assign_action = QAction("Assign Random Effects to All Cues", self)
-        assign_action.triggered.connect(self.show_random_assignment_dialog)
-        menu.addAction(assign_action)
-
-        # Show the menu at the cursor position
-        menu.exec(self.horizontalHeader().mapToGlobal(position))
-
-    def show_random_assignment_dialog(self):
-        """Show confirmation dialog for random effect assignment"""
-        from PySide6.QtWidgets import QMessageBox
-
-        # Count how many cues exist
-        num_cues = len(self.model._data)
-
-        if num_cues == 0:
-            QMessageBox.information(
-                self,
-                "No Cues",
-                "There are no cues in the table to assign effects to.",
-                QMessageBox.Ok
-            )
-            return
-
-        # Create custom message box
-        msg_box = QMessageBox(self)
-        msg_box.setWindowTitle("Assign Random Effects")
-        msg_box.setText(f"Assign all {num_cues} cues a random Excalibur effect?")
-        msg_box.setInformativeText("This will randomly assign one of the 24 Excalibur shells to each cue.")
-        msg_box.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg_box.setDefaultButton(QMessageBox.Yes)
-        msg_box.setIcon(QMessageBox.Question)
-
-        # Style the message box
-        msg_box.setStyleSheet("""
-            QMessageBox {
-                background-color: #2d2d2d;
-                color: white;
-            }
-            QMessageBox QLabel {
-                color: white;
-            }
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border: none;
-                padding: 8px 16px;
-                min-width: 80px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:pressed {
-                background-color: #3d8b40;
-            }
-        """)
-
-        # Show dialog and get response
-        result = msg_box.exec()
-
-        if result == QMessageBox.Yes:
-            self.assign_random_effects_to_all()
-
-    def assign_random_effects_to_all(self):
-        """Assign random Excalibur effects to all cues"""
-        import random
-        from views.dialogs.excalibur_shell_selector_dialog import ExcaliburShellSelector
-
-        # Get list of all Excalibur shells
-        shells = ExcaliburShellSelector.EXCALIBUR_SHELLS
-
-        # Assign random effect to each cue
-        for row in range(len(self.model._data)):
-            # Pick a random shell
-            random_shell = random.choice(shells)
-
-            # Get cue data
-            cue_row = self.model._data[row]
-            cue_data = {
-                'cue_number': cue_row[0],
-                'cue_type': cue_row[1],
-                'outputs': cue_row[2],
-                'delay': cue_row[3],
-                'execute_time': cue_row[4]
-            }
-
-            # Create a temporary dialog instance to get the visual properties
-            # (we won't show it, just use it to generate the properties)
-            temp_dialog = ExcaliburShellSelector(parent=self, cue_data=cue_data)
-
-            # Get the visual properties for this shell using the dialog's method
-            visual_props = temp_dialog.get_shell_configuration(random_shell)
-
-            # Apply the visual effects to this row
-            self.apply_visual_effects(row, visual_props)
-
-        # Update the view
-        self.model.layoutChanged.emit()
-
-        # Show success message
-        from PySide6.QtWidgets import QMessageBox
-        QMessageBox.information(
-            self,
-            "Success",
-            f"Successfully assigned random effects to {len(self.model._data)} cues!",
-            QMessageBox.Ok
-        )
 
     def delete_all_cues(self):
         """Delete all cues from the table"""

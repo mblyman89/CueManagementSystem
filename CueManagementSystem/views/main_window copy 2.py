@@ -117,10 +117,6 @@ class MainWindow(QMainWindow):
         self.vr_preview_controller = VRPreviewController(self)
         self.vr_preview_window = None  # Will be created when VR preview starts
 
-        # Initialize UE5 manager
-        from views.managers.ue5_manager import UE5Manager
-        self.ue5_manager = UE5Manager(self)
-
         # Connect preview controller signals
         self.preview_controller.preview_started.connect(self.handle_preview_started)
         self.preview_controller.preview_ended.connect(self.handle_preview_ended)
@@ -1686,7 +1682,7 @@ class MainWindow(QMainWindow):
 
             # Connect signals for LED and VR preview
             music_dialog.preview_led_requested.connect(self._start_led_preview_with_music)
-            music_dialog.preview_vr_requested.connect(self._start_vr_preview_with_music_and_mode)
+            music_dialog.preview_vr_requested.connect(self._start_vr_preview_with_music)
 
             # For hardware mode, keep old behavior
             if is_hardware_execution:
@@ -1764,43 +1760,6 @@ class MainWindow(QMainWindow):
             print(f"Error starting LED preview: {str(e)}")
             traceback.print_exc()
             QMessageBox.critical(self, "Preview Error", f"Could not start LED preview: {str(e)}")
-
-    def _start_vr_preview_with_music_and_mode(self, music_file_info, mode="python"):
-        """
-        Start the VR preview with selected music file and visualization mode
-
-        Args:
-            music_file_info (dict or None): Information about the selected music file,
-                                           or None if no music was selected
-            mode (str): Visualization mode - "python" or "ue5"
-        """
-        try:
-            # Handle UE5 mode
-            if mode == "ue5":
-                # Launch UE5 if not running and auto-launch is enabled
-                if self.ue5_manager.settings.get('auto_launch', True):
-                    if not self.ue5_manager.is_running:
-                        self.statusBar().showMessage("Launching Unreal Engine 5...")
-                        success = self.ue5_manager.launch_ue5_project()
-                        if not success:
-                            QMessageBox.critical(
-                                self,
-                                "UE5 Launch Failed",
-                                "Failed to launch Unreal Engine 5.\n\n"
-                                "Please check your settings in Tools → Preferences.",
-                                QMessageBox.Ok
-                            )
-                            return
-
-            # Continue with existing preview logic (works for both Python and UE5)
-            self._start_vr_preview_with_music(music_file_info)
-
-        except Exception as e:
-            print(f"Error starting VR preview: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "VR Preview Error", f"Could not start VR preview: {str(e)}")
 
     def _start_vr_preview_with_music(self, music_file_info):
         """

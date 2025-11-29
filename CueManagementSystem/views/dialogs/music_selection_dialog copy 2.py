@@ -18,8 +18,7 @@ License: MIT
 """
 
 from PySide6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QLabel,
-                               QPushButton, QListWidget, QListWidgetItem,
-                               QComboBox, QGroupBox)
+                               QPushButton, QListWidget, QListWidgetItem)
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from views.managers.music_manager import MusicManager
@@ -30,14 +29,13 @@ class MusicSelectionDialog(QDialog):
 
     music_selected = Signal(dict)  # Signal emitted when music is selected
     preview_led_requested = Signal(dict)  # Signal for LED preview
-    preview_vr_requested = Signal(dict, str)  # Signal for VR preview (music, mode)
+    preview_vr_requested = Signal(dict)  # Signal for VR preview
 
-    def __init__(self, parent=None, music_manager=None, is_hardware_mode=False, ue5_available=False):
+    def __init__(self, parent=None, music_manager=None, is_hardware_mode=False):
         super().__init__(parent)
 
         # Store mode for UI updates
         self.is_hardware_mode = is_hardware_mode
-        self.ue5_available = ue5_available
         self.selected_music = None  # Track selected music
 
         # Use the provided music manager or create a new one
@@ -84,10 +82,6 @@ class MusicSelectionDialog(QDialog):
         info_label.setAlignment(Qt.AlignCenter)
         info_label.setStyleSheet("color: gray; font-style: italic;")
         main_layout.addWidget(info_label)
-
-        # VR Preview Mode Selector (only for simulation mode)
-        if not self.is_hardware_mode:
-            self._create_preview_mode_selector(main_layout)
 
         # Dialog buttons
         button_layout = QHBoxLayout()
@@ -171,95 +165,6 @@ class MusicSelectionDialog(QDialog):
         self.accept()
 
     def _preview_vr(self):
-        """Start VR preview with optional music and selected mode"""
-        # Get selected mode
-        mode = self.mode_combo.currentData() if hasattr(self, 'mode_combo') else "python"
-
-        # Emit signal with music and mode
-        self.preview_vr_requested.emit(self.selected_music, mode)
+        """Start VR preview with optional music"""
+        self.preview_vr_requested.emit(self.selected_music)
         self.accept()
-
-    def _create_preview_mode_selector(self, parent_layout):
-        """Create the preview mode selector group"""
-        group_box = QGroupBox("VR Preview Mode")
-        group_box.setStyleSheet("""
-            QGroupBox {
-                font-weight: bold;
-                border: 2px solid #4CAF50;
-                border-radius: 5px;
-                margin-top: 10px;
-                padding-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                left: 10px;
-                padding: 0 5px;
-            }
-        """)
-
-        group_layout = QVBoxLayout()
-
-        # Mode selector
-        mode_layout = QHBoxLayout()
-        mode_label = QLabel("Visualization Engine:")
-        mode_label.setFont(QFont("Arial", 10, QFont.Bold))
-        mode_layout.addWidget(mode_label)
-
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItem("🐍 Python Visualizer (Quick, Built-in)", "python")
-
-        if self.ue5_available:
-            self.mode_combo.addItem("🎮 Unreal Engine 5 (Photorealistic)", "ue5")
-        else:
-            self.mode_combo.addItem("🎮 Unreal Engine 5 (Not Configured)", "ue5_disabled")
-            self.mode_combo.model().item(1).setEnabled(False)
-
-        self.mode_combo.setMinimumWidth(300)
-        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
-        mode_layout.addWidget(self.mode_combo)
-        mode_layout.addStretch()
-
-        group_layout.addLayout(mode_layout)
-
-        # Description label
-        self.mode_description = QLabel()
-        self.mode_description.setWordWrap(True)
-        self.mode_description.setStyleSheet("color: #666; padding: 5px; font-size: 10pt;")
-        self._update_mode_description()
-        group_layout.addWidget(self.mode_description)
-
-        group_box.setLayout(group_layout)
-        parent_layout.addWidget(group_box)
-
-    def _update_mode_description(self):
-        """Update the mode description based on selection"""
-        if not hasattr(self, 'mode_combo'):
-            return
-
-        mode = self.mode_combo.currentData()
-
-        if mode == "python":
-            description = (
-                "✓ Instant startup (no loading time)\n"
-                "✓ Built-in, always available\n"
-                "✓ Good quality particle effects\n"
-                "✓ Perfect for quick testing"
-            )
-        elif mode == "ue5":
-            description = (
-                "✓ Photorealistic graphics\n"
-                "✓ Advanced particle systems\n"
-                "✓ Professional-quality audio\n"
-                "⚠ Requires 30-60 seconds to launch"
-            )
-        else:  # ue5_disabled
-            description = (
-                "UE5 is not configured.\n"
-                "Go to Tools → Preferences to set it up."
-            )
-
-        self.mode_description.setText(description)
-
-    def _on_mode_changed(self):
-        """Handle preview mode change"""
-        self._update_mode_description()

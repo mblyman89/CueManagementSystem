@@ -112,15 +112,6 @@ class MainWindow(QMainWindow):
             self.led_panel
         )
 
-        # Initialize VR preview controller (separate from LED preview)
-        from controllers.vr_preview_controller import VRPreviewController
-        self.vr_preview_controller = VRPreviewController(self)
-        self.vr_preview_window = None  # Will be created when VR preview starts
-
-        # Initialize UE5 manager
-        from views.managers.ue5_manager import UE5Manager
-        self.ue5_manager = UE5Manager(self)
-
         # Connect preview controller signals
         self.preview_controller.preview_started.connect(self.handle_preview_started)
         self.preview_controller.preview_ended.connect(self.handle_preview_ended)
@@ -193,9 +184,6 @@ class MainWindow(QMainWindow):
 
         # Create preferences menu
         self.create_preferences_menu()
-
-        # Create tools menu
-        self.create_tools_menu()
 
         # Main vertical layout
         main_layout = QVBoxLayout(central_widget)
@@ -1667,7 +1655,7 @@ class MainWindow(QMainWindow):
 
     def preview_show(self, is_hardware_execution=False):
         """
-        Preview the entire show on the LED panel or VR
+        Preview the entire show on the LED panel
 
         Args:
             is_hardware_execution (bool): Whether this preview is accompanying hardware execution
@@ -1682,15 +1670,8 @@ class MainWindow(QMainWindow):
             from views.dialogs.music_selection_dialog import MusicSelectionDialog
 
             # Show music selection dialog with the existing music manager
-            music_dialog = MusicSelectionDialog(self, self.music_manager, is_hardware_mode=is_hardware_execution)
-
-            # Connect signals for LED and VR preview
-            music_dialog.preview_led_requested.connect(self._start_led_preview_with_music)
-            music_dialog.preview_vr_requested.connect(self._start_vr_preview_with_music_and_mode)
-
-            # For hardware mode, keep old behavior
-            if is_hardware_execution:
-                music_dialog.music_selected.connect(self._start_preview_with_music)
+            music_dialog = MusicSelectionDialog(self, self.music_manager)
+            music_dialog.music_selected.connect(self._start_preview_with_music)
 
             # If dialog is rejected, don't start the preview
             if music_dialog.exec() != QDialog.Accepted:
@@ -1703,17 +1684,7 @@ class MainWindow(QMainWindow):
 
     def _start_preview_with_music(self, music_file_info):
         """
-        Start the LED preview with selected music file (hardware mode)
-
-        Args:
-            music_file_info (dict or None): Information about the selected music file,
-                                           or None if no music was selected
-        """
-        self._start_led_preview_with_music(music_file_info)
-
-    def _start_led_preview_with_music(self, music_file_info):
-        """
-        Start the LED preview with selected music file
+        Start the preview with selected music file
 
         Args:
             music_file_info (dict or None): Information about the selected music file,
@@ -1726,7 +1697,7 @@ class MainWindow(QMainWindow):
             # Play music if selected
             if music_file_info:
                 music_name = f"{music_file_info['name']}{music_file_info['extension']}"
-                status_message = f"LED preview started with music: {music_name}"
+                status_message = f"Show preview started with music: {music_name}"
 
                 # Set the music file path in the preview controller
                 self.preview_controller.set_music_file(music_file_info['path'])
@@ -1735,7 +1706,7 @@ class MainWindow(QMainWindow):
                 self.music_manager.preview_music(music_file_info['path'], volume=0.7)
                 print(f"Playing music: {music_file_info['path']}")
             else:
-                status_message = "LED preview started (no music)"
+                status_message = "Show preview started (no music)"
 
             # Start the preview
             if self.preview_controller.start_preview():
@@ -1758,164 +1729,12 @@ class MainWindow(QMainWindow):
                 # Update UI to reflect preview state
                 self.statusBar().showMessage(status_message)
             else:
-                QMessageBox.warning(self, "Preview Failed", "Could not start the LED preview.")
+                QMessageBox.warning(self, "Preview Failed", "Could not start the show preview.")
 
         except Exception as e:
-            print(f"Error starting LED preview: {str(e)}")
+            print(f"Error starting show preview: {str(e)}")
             traceback.print_exc()
-            QMessageBox.critical(self, "Preview Error", f"Could not start LED preview: {str(e)}")
-
-    def _start_vr_preview_with_music_and_mode(self, music_file_info, mode="python"):
-        """
-        Start the VR preview with selected music file and visualization mode
-
-        Args:
-            music_file_info (dict or None): Information about the selected music file,
-                                           or None if no music was selected
-            mode (str): Visualization mode - "python" or "ue5"
-        """
-        try:
-            # Handle UE5 mode
-            if mode == "ue5":
-                # Launch UE5 if not running and auto-launch is enabled
-                if self.ue5_manager.settings.get('auto_launch', True):
-                    if not self.ue5_manager.is_running:
-                        self.statusBar().showMessage("Launching Unreal Engine 5...")
-                        success = self.ue5_manager.launch_ue5_project()
-                        if not success:
-                            QMessageBox.critical(
-                                self,
-                                "UE5 Launch Failed",
-                                "Failed to launch Unreal Engine 5.\n\n"
-                                "Please check your settings in Tools → Preferences.",
-                                QMessageBox.Ok
-                            )
-                            return
-
-            # Continue with existing preview logic (works for both Python and UE5)
-            self._start_vr_preview_with_music(music_file_info)
-
-        except Exception as e:
-            print(f"Error starting VR preview: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "VR Preview Error", f"Could not start VR preview: {str(e)}")
-
-    def _start_vr_preview_with_music(self, music_file_info):
-        """
-        Start the VR preview with selected music file
-
-        Args:
-            music_file_info (dict or None): Information about the selected music file,
-                                           or None if no music was selected
-        """
-        try:
-            # Create VR preview window (embedded visualizer - no server needed)
-            from views.dialogs.vr_preview_dialog import VRPreviewWindow
-            self.vr_preview_window = VRPreviewWindow(self)
-
-            # Set the preview window reference in the controller
-            self.vr_preview_controller.set_preview_window(self.vr_preview_window)
-
-            # Connect signals
-            self.vr_preview_controller.countdown_tick.connect(self.vr_preview_window.update_countdown)
-            self.vr_preview_controller.preview_started.connect(self._on_vr_preview_started)
-            self.vr_preview_controller.preview_completed.connect(self._on_vr_preview_completed)
-            self.vr_preview_controller.preview_error.connect(self._on_vr_preview_error)
-            self.vr_preview_window.preview_cancelled.connect(self._on_vr_preview_cancelled)
-
-            # Start VR preview with countdown
-            self.vr_preview_controller.start_preview(
-                self.cue_table.model._data,
-                music_file_info
-            )
-
-            # Store music file info for playback at T=0
-            self.vr_music_file_info = music_file_info
-
-            # Show status
-            if music_file_info:
-                music_name = f"{music_file_info['name']}{music_file_info['extension']}"
-                self.statusBar().showMessage(f"VR preview starting with music: {music_name}")
-            else:
-                self.statusBar().showMessage("VR preview starting (no music)")
-
-        except Exception as e:
-            print(f"Error starting VR preview: {str(e)}")
-            traceback.print_exc()
-            QMessageBox.critical(self, "VR Preview Error", f"Could not start VR preview: {str(e)}")
-
-    def _on_vr_preview_started(self):
-        """Handle VR preview started at T=0"""
-        try:
-            # Start music playback at T=0 (critical synchronization point)
-            if hasattr(self, 'vr_music_file_info') and self.vr_music_file_info:
-                self.music_manager.preview_music(self.vr_music_file_info['path'], volume=0.7)
-                print(f"Music started at T=0: {self.vr_music_file_info['path']}")
-
-            # Update window
-            if self.vr_preview_window:
-                self.vr_preview_window.show_preview_running()
-
-            self.statusBar().showMessage("VR preview running")
-
-        except Exception as e:
-            print(f"Error in VR preview start: {str(e)}")
-            traceback.print_exc()
-
-    def _on_vr_preview_completed(self):
-        """Handle VR preview completion"""
-        try:
-            # Stop music
-            self.music_manager.stop_preview()
-
-            # Show completion message
-            if self.vr_preview_window:
-                self.vr_preview_window.show_preview_complete()
-
-                # Close window after 3 seconds
-                from PySide6.QtCore import QTimer
-                QTimer.singleShot(3000, self.vr_preview_window.close)
-
-            self.statusBar().showMessage("VR preview completed")
-
-        except Exception as e:
-            print(f"Error in VR preview completion: {str(e)}")
-            traceback.print_exc()
-
-    def _on_vr_preview_error(self, error_message: str):
-        """Handle VR preview error"""
-        try:
-            # Stop music
-            self.music_manager.stop_preview()
-
-            # Show error
-            if self.vr_preview_window:
-                self.vr_preview_window.show_error(error_message)
-
-            self.statusBar().showMessage(f"VR preview error: {error_message}")
-
-            QMessageBox.critical(self, "VR Preview Error", f"VR preview error: {error_message}")
-
-        except Exception as e:
-            print(f"Error handling VR preview error: {str(e)}")
-            traceback.print_exc()
-
-    def _on_vr_preview_cancelled(self):
-        """Handle VR preview cancellation"""
-        try:
-            # Stop preview
-            self.vr_preview_controller.stop_preview()
-
-            # Stop music
-            self.music_manager.stop_preview()
-
-            self.statusBar().showMessage("VR preview cancelled")
-
-        except Exception as e:
-            print(f"Error cancelling VR preview: {str(e)}")
-            traceback.print_exc()
+            QMessageBox.critical(self, "Preview Error", f"Could not start show preview: {str(e)}")
 
     def stop_preview(self):
         """Stop the show preview"""
@@ -2199,16 +2018,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"Could not create preferences menu: {e}")
 
-    def create_tools_menu(self):
-        """Create tools menu for utilities"""
-        try:
-            # Tools menu can be added here for future utilities
-            # Currently no tools menu needed as VR preview is integrated into preview flow
-            pass
-
-        except Exception as e:
-            print(f"Could not create tools menu: {e}")
-
     def show_spleeter_preferences(self):
         """Show Spleeter preferences dialog"""
         if not SPLEETER_SETUP_AVAILABLE:
@@ -2239,25 +2048,6 @@ class MainWindow(QMainWindow):
                 f"Could not open Spleeter preferences:\n{str(e)}"
             )
             import traceback
-
-
-def show_visualization_control(self):
-    """Show visualization control panel dialog"""
-    try:
-        from views.dialogs.visualization_control_dialog import VisualizationControlDialog
-
-        # Use VR preview controller's visualization bridge
-        dialog = VisualizationControlDialog(self.vr_preview_controller, self)
-        dialog.show()  # Non-blocking - allows interaction with other windows
-
-    except Exception as e:
-        QMessageBox.warning(
-            self,
-            "Error",
-            f"Could not open visualization control panel:\n{str(e)}"
-        )
-        import traceback
-        traceback.print_exc()
-        traceback.print_exc()
+            traceback.print_exc()
 
 
