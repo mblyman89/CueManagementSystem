@@ -1,6 +1,0 @@
-# Python Arcade Firework Visualizer
-# Required dependencies
-
-arcade==3.0.0
-pillow>=10.0.0
-numpy>=1.24.0
