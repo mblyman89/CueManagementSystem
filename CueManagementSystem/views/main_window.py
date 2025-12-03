@@ -54,6 +54,15 @@ from views.led_panel.preview_timeline_widget import PreviewTimelineWidget
 from views.managers.preview_state_manager import PreviewStateManager
 from views.managers.show_manager import ShowManager
 
+# Import firework visualizer preview methods
+from views.main_window_firework_preview import (
+    _start_firework_visualizer_preview,
+    _on_firework_visualizer_started,
+    _on_firework_visualizer_ready,
+    _on_firework_visualizer_completed,
+    _on_firework_visualizer_error
+)
+
 # Import for Spleeter setup
 try:
     from views.dialogs.spleeter_setup_dialog import SpleeterSetupDialog
@@ -120,6 +129,10 @@ class MainWindow(QMainWindow):
         # Initialize UE5 manager
         from views.managers.ue5_manager import UE5Manager
         self.ue5_manager = UE5Manager(self)
+
+        # Initialize Firework Visualizer Bridge
+        from controllers.firework_visualizer_bridge import FireworkVisualizerBridge
+        self.firework_visualizer_bridge = FireworkVisualizerBridge(self)
 
         # Connect preview controller signals
         self.preview_controller.preview_started.connect(self.handle_preview_started)
@@ -1765,42 +1778,36 @@ class MainWindow(QMainWindow):
             traceback.print_exc()
             QMessageBox.critical(self, "Preview Error", f"Could not start LED preview: {str(e)}")
 
-    def _start_vr_preview_with_music_and_mode(self, music_file_info, mode="python"):
+    def _start_vr_preview_with_music_and_mode(self, music_file_info, mode="led_panel"):
         """
-        Start the VR preview with selected music file and visualization mode
+        Start the preview with selected music file and visualization mode
 
         Args:
             music_file_info (dict or None): Information about the selected music file,
                                            or None if no music was selected
-            mode (str): Visualization mode - "python" or "ue5"
+            mode (str): Visualization mode - "led_panel" or "firework_visualizer"
         """
         try:
-            # Handle UE5 mode
-            if mode == "ue5":
-                # Launch UE5 if not running and auto-launch is enabled
-                if self.ue5_manager.settings.get('auto_launch', True):
-                    if not self.ue5_manager.is_running:
-                        self.statusBar().showMessage("Launching Unreal Engine 5...")
-                        success = self.ue5_manager.launch_ue5_project()
-                        if not success:
-                            QMessageBox.critical(
-                                self,
-                                "UE5 Launch Failed",
-                                "Failed to launch Unreal Engine 5.\n\n"
-                                "Please check your settings in Tools → Preferences.",
-                                QMessageBox.Ok
-                            )
-                            return
+            # Handle LED Panel mode (classic)
+            if mode == "led_panel":
+                self._start_led_preview_with_music(music_file_info)
+                return
 
-            # Continue with existing preview logic (works for both Python and UE5)
-            self._start_vr_preview_with_music(music_file_info)
+            # Handle Professional Firework Visualizer mode
+            if mode == "firework_visualizer":
+                self._start_firework_visualizer_preview(music_file_info)
+                return
+
+            # Fallback to LED panel for unknown modes
+            print(f"Unknown preview mode '{mode}', falling back to LED panel")
+            self._start_led_preview_with_music(music_file_info)
 
         except Exception as e:
-            print(f"Error starting VR preview: {str(e)}")
+            print(f"Error starting preview: {str(e)}")
             import traceback
             traceback.print_exc()
             from PySide6.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "VR Preview Error", f"Could not start VR preview: {str(e)}")
+            QMessageBox.critical(self, "Preview Error", f"Could not start preview: {str(e)}")
 
     def _start_vr_preview_with_music(self, music_file_info):
         """
@@ -2259,5 +2266,13 @@ def show_visualization_control(self):
         import traceback
         traceback.print_exc()
         traceback.print_exc()
+
+
+# Add firework visualizer preview methods to MainWindow class
+MainWindow._start_firework_visualizer_preview = _start_firework_visualizer_preview
+MainWindow._on_firework_visualizer_started = _on_firework_visualizer_started
+MainWindow._on_firework_visualizer_ready = _on_firework_visualizer_ready
+MainWindow._on_firework_visualizer_completed = _on_firework_visualizer_completed
+MainWindow._on_firework_visualizer_error = _on_firework_visualizer_error
 
 

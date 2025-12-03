@@ -5,9 +5,9 @@ Integrates the new physics-based launch system with particle effects
 
 import arcade
 import random
-import config
-from simple_background_system import SimpleBackgroundSystem
-from enhanced_launch_system import EnhancedLaunchSystem
+from . import config
+from .simple_background_system import SimpleBackgroundSystem
+from .enhanced_launch_system import EnhancedLaunchSystem
 
 
 class EnhancedSimpleFireworkGameView(arcade.Window):
@@ -50,7 +50,16 @@ class EnhancedSimpleFireworkGameView(arcade.Window):
         self.auto_launch_timer = 0.0
         self.auto_launch_interval = 2.0
 
+        # Memory management (ULTRA-AGGRESSIVE monitoring)
+        self.cleanup_timer = 0.0
+        self.cleanup_interval = 2.0  # Clean up every 2 seconds (ULTRA-AGGRESSIVE)
+        self.frame_count = 0
+        self.fps_samples = []
+        self.last_particle_count = 0
+        self.cleanup_counter = 0
+
         print("Enhanced game view initialized!")
+        print("✓ FULL PARTICLE MODE: Using original particle system with process isolation")
 
     def setup(self):
         """Set up the game."""
@@ -197,12 +206,52 @@ class EnhancedSimpleFireworkGameView(arcade.Window):
             )
 
     def on_update(self, delta_time: float):
-        """Update game state."""
+        """Update game state with memory management."""
         if self.paused:
             return
 
         # Update launch system
         self.launch_system.update(delta_time)
+
+        # CRITICAL: Periodic cleanup to prevent memory buildup
+        self.cleanup_timer += delta_time
+        if self.cleanup_timer >= self.cleanup_interval:
+            self.cleanup_timer = 0.0
+            self._perform_cleanup()
+
+        # Track FPS for performance monitoring
+        self.frame_count += 1
+        current_fps = arcade.get_fps()
+        self.fps_samples.append(current_fps)
+        if len(self.fps_samples) > 60:
+            self.fps_samples.pop(0)
+
+        # Get particle stats
+        stats = self.launch_system.get_statistics()
+        particles = stats['active_particles']
+
+        # CRITICAL: Multiple cleanup thresholds
+        if particles > 3000:
+            # Level 1: Force ultra-aggressive cleanup
+            if hasattr(self.launch_system, 'particles'):
+                self.launch_system.particles._ultra_aggressive_cleanup()
+
+        if particles > 4000:
+            # Level 2: Emergency particle reduction (50%)
+            print(f"⚠️ HIGH PARTICLE COUNT: {particles} - emergency reduction")
+            if hasattr(self.launch_system, 'particles'):
+                self.launch_system.particles._emergency_particle_reduction()
+
+        if particles > 5000:
+            # Level 3: Nuclear option - clear everything
+            print(f"🚨 CRITICAL: {particles} particles - nuclear clear!")
+            if hasattr(self.launch_system, 'particles'):
+                self.launch_system.particles._emergency_clear_all()
+
+        # Warn if FPS drops critically low
+        if current_fps < 20 and self.frame_count % 60 == 0:
+            print(f"⚠ WARNING: Low FPS detected: {current_fps:.1f}, Particles: {particles}")
+            self._perform_cleanup()
 
         # Auto-launch logic
         if self.auto_launch:
@@ -210,6 +259,40 @@ class EnhancedSimpleFireworkGameView(arcade.Window):
             if self.auto_launch_timer >= self.auto_launch_interval:
                 self.auto_launch_timer = 0.0
                 self._launch_random_firework()
+
+    def _perform_cleanup(self):
+        """Perform ULTRA-AGGRESSIVE memory cleanup."""
+        stats = self.launch_system.get_statistics()
+        particles = stats['active_particles']
+        emitters = stats['active_emitters']
+
+        self.cleanup_counter += 1
+
+        # Only print every 5th cleanup to reduce console spam
+        if self.cleanup_counter % 5 == 0:
+            print(f"🧹 CLEANUP #{self.cleanup_counter}: {particles} particles, {emitters} emitters")
+
+        # Force ultra-aggressive cleanup TWICE
+        if hasattr(self.launch_system, 'particles'):
+            self.launch_system.particles._ultra_aggressive_cleanup()
+            self.launch_system.particles._ultra_aggressive_cleanup()
+
+        # If particle count is high, force emergency reduction
+        if particles > 3000:
+            if hasattr(self.launch_system, 'particles'):
+                self.launch_system.particles._emergency_particle_reduction()
+
+        # Aggressive garbage collection
+        import gc
+        gc.collect()
+
+        # Check if particle count is growing rapidly
+        if particles > self.last_particle_count * 1.3:
+            print(f"⚠️ RAPID GROWTH: {self.last_particle_count} → {particles}")
+            if hasattr(self.launch_system, 'particles'):
+                self.launch_system.particles._emergency_particle_reduction()
+
+        self.last_particle_count = particles
 
     def _launch_random_firework(self):
         """Launch a random firework."""

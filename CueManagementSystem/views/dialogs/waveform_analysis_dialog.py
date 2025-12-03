@@ -1656,6 +1656,19 @@ class WaveformAnalysisDialog(QDialog):
                 self.waveform_view.get_manual_peak_count() if self.waveform_view else 0
             )
 
+            # CRITICAL FIX: Update peak slider range after loading state
+            # This was missing, causing the spinbox to not update when loading saved shows
+            if self.analyzer and hasattr(self.analyzer, 'peaks'):
+                peaks = self.analyzer.get_peak_data() if hasattr(self.analyzer,
+                                                                 'get_peak_data') else self.analyzer.peaks
+                if peaks:
+                    total_peaks = len(peaks)
+                    if hasattr(self, 'waveform_controls_panel') and hasattr(self.waveform_controls_panel,
+                                                                            'set_peak_slider_range'):
+                        self.waveform_controls_panel.set_peak_slider_range(total_peaks)
+                        print(f"🔧 Load State: Set peak slider range to {total_peaks} after loading")
+                        self.logger.info(f"Peak slider range updated to {total_peaks} after loading state")
+
             return True
 
         except Exception as e:

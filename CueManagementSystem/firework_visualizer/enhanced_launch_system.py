@@ -5,9 +5,9 @@ Manages the complete firework lifecycle from launch to burst
 
 import random
 from typing import List, Tuple, Optional, Dict
-from enhanced_shell import EnhancedFireworkShell
-from firework_physics import FireworkPhysics
-from firework_particles import FireworkParticleSystem
+from .enhanced_shell import EnhancedFireworkShell
+from .firework_physics import FireworkPhysics
+from .firework_particles import FireworkParticleSystem
 
 
 class EnhancedLaunchSystem:
@@ -191,11 +191,22 @@ class EnhancedLaunchSystem:
             # Update shell physics
             should_spawn_trail = shell.update(delta_time)
 
-            # Spawn trail particles
-            if should_spawn_trail and not shell.has_burst:
+            # Update trail sprite position (single moving dot)
+            if not shell.has_burst:
                 pos = shell.get_position_2d()
-                vel = shell.get_velocity_2d()
-                self.particles.create_trail_particle(pos, vel)
+
+                # Create trail sprite if it doesn't exist
+                if shell.trail_sprite is None:
+                    shell.trail_sprite = self.particles.create_moving_trail_sprite(pos)
+                else:
+                    # Update position to follow shell
+                    shell.trail_sprite.center_x = pos[0]
+                    shell.trail_sprite.center_y = pos[1]
+            else:
+                # Remove trail sprite when burst happens
+                if shell.trail_sprite is not None:
+                    shell.trail_sprite.remove_from_sprite_lists()
+                    shell.trail_sprite = None
 
             # NO SMOKE - disabled for distant fireworks
             # (should_spawn_smoke always returns False now)

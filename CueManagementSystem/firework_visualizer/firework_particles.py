@@ -99,19 +99,106 @@ class FireworkParticleSystem:
         )
 
     def update(self, delta_time: float):
-        """Update all particle systems."""
+        """Update all particle systems with ULTRA-AGGRESSIVE cleanup."""
+        # CRITICAL: Limit emitter count FIRST
+        if len(self.emitters) > 40:
+            # Remove oldest emitters if too many
+            excess = len(self.emitters) - 40
+            self.emitters = self.emitters[excess:]
+
         # Update emitters
         for emitter in self.emitters:
             emitter.update()
 
-        # Remove completed emitters
+        # CRITICAL: Remove completed emitters IMMEDIATELY
         self.emitters = [e for e in self.emitters if not e.can_reap()]
 
-        # Update sprite lists
+        # ULTRA-AGGRESSIVE: Cleanup BEFORE updating sprite lists
+        self._ultra_aggressive_cleanup()
+
+        # Update sprite lists (after cleanup)
         self.glow_particles.update()
         self.core_particles.update()
         self.main_particles.update()
         self.trail_particles.update()
+
+        # SECOND PASS: Cleanup again after update
+        self._ultra_aggressive_cleanup()
+
+        # THIRD PASS: If still too many particles, force emergency cleanup
+        total_particles = (len(self.glow_particles) + len(self.core_particles) +
+                           len(self.main_particles) + len(self.trail_particles))
+        if total_particles > 3500:
+            self._emergency_particle_reduction()
+
+    def _ultra_aggressive_cleanup(self):
+        """ULTRA-AGGRESSIVE cleanup using optimized batch operations."""
+        MAX_PARTICLES_PER_LIST = 800  # Further reduced from 1000
+        ALPHA_THRESHOLD = 15  # Increased from 10 (remove earlier)
+
+        for sprite_list in [self.glow_particles, self.core_particles,
+                            self.main_particles, self.trail_particles]:
+
+            list_len = len(sprite_list)
+            if list_len == 0:
+                continue
+
+            # OPTIMIZED: Use list comprehension for faster filtering
+            # Remove particles with low alpha in one pass
+            particles_to_keep = []
+            particles_to_remove = []
+
+            for particle in sprite_list:
+                if hasattr(particle, "alpha") and particle.alpha <= ALPHA_THRESHOLD:
+                    particles_to_remove.append(particle)
+                else:
+                    particles_to_keep.append(particle)
+
+            # Batch remove
+            for particle in particles_to_remove:
+                particle.remove_from_sprite_lists()
+
+            # Recalculate length after removal
+            list_len = len(sprite_list)
+
+            # Hard limit enforcement - remove oldest particles
+            if list_len > MAX_PARTICLES_PER_LIST:
+                excess = list_len - MAX_PARTICLES_PER_LIST
+                # Remove in larger batches for efficiency
+                batch_size = min(excess, 100)  # Remove up to 100 at once
+                for i in range(batch_size):
+                    if len(sprite_list) > 0:
+                        sprite_list[0].remove_from_sprite_lists()
+
+            # Emergency cleanup if still over limit
+            if len(sprite_list) > MAX_PARTICLES_PER_LIST * 1.2:
+                print(f"⚠️ EMERGENCY CLEANUP: {len(sprite_list)} particles in list!")
+                # Remove 60% of particles immediately
+                target = int(len(sprite_list) * 0.6)
+                for i in range(target):
+                    if len(sprite_list) > 0:
+                        sprite_list[0].remove_from_sprite_lists()
+
+    def _emergency_particle_reduction(self):
+        """AGGRESSIVE: Reduce particles by 50% when overwhelmed."""
+        print("🚨 EMERGENCY REDUCTION: Too many particles, reducing by 50%")
+
+        for sprite_list in [self.glow_particles, self.core_particles,
+                            self.main_particles, self.trail_particles]:
+            target = len(sprite_list) // 2
+            for i in range(target):
+                if len(sprite_list) > 0:
+                    sprite_list[0].remove_from_sprite_lists()
+
+    def _emergency_clear_all(self):
+        """NUCLEAR OPTION: Clear everything if overwhelmed."""
+        print("🚨 NUCLEAR: Clearing all particles!")
+        self.emitters.clear()
+
+        for sprite_list in [self.glow_particles, self.core_particles,
+                            self.main_particles, self.trail_particles]:
+            for particle in list(sprite_list):
+                particle.remove_from_sprite_lists()
 
     def draw(self):
         """Draw all particles with proper layering and blending."""
@@ -133,23 +220,22 @@ class FireworkParticleSystem:
         """Get total active particle count."""
         return len(self.emitters)
 
-    def create_trail_particle(self,
-                              position: Tuple[float, float],
-                              velocity: Tuple[float, float] = (0, 0)):
-        """Create trail particle for ascending shell - SMALL."""
-        emitter = Emitter(
-            center_xy=position,
-            emit_controller=EmitBurst(1),
-            particle_factory=lambda emitter: FadeParticle(
-                filename_or_texture=self.trail_texture,
-                change_xy=(0, 0),
-                lifetime=random.uniform(0.15, 0.25),
-                scale=random.uniform(0.6, 0.9),
-                start_alpha=255,
-                end_alpha=200
-            )
-        )
-        self.emitters.append(emitter)
+    def create_moving_trail_sprite(self, position: Tuple[float, float]):
+        """Create a SINGLE moving trail sprite that follows the shell."""
+        import arcade
+
+        # Create a sprite with the trail texture
+        sprite = arcade.Sprite()
+        sprite.texture = self.trail_texture
+        sprite.center_x = position[0]
+        sprite.center_y = position[1]
+        sprite.scale = 1.2  # Slightly larger for visibility
+        sprite.alpha = 255
+
+        # Add to trail particles list
+        self.trail_particles.append(sprite)
+
+        return sprite
 
     def create_launch_flash(self, position: Tuple[float, float]):
         """Create small launch flash."""
@@ -262,7 +348,7 @@ class FireworkParticleSystem:
                                         tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=self._random_velocity_sphere(random.uniform(smin, smax)),
-                    lifetime=random.uniform(2.5, 3.5),
+                    lifetime=random.uniform(1.0, 1.5),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,
@@ -306,7 +392,7 @@ class FireworkParticleSystem:
                                         tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=self._random_velocity_sphere(random.uniform(smin, smax)),
-                    lifetime=random.uniform(2.5, 3.5),
+                    lifetime=random.uniform(1.0, 1.5),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,
@@ -327,7 +413,7 @@ class FireworkParticleSystem:
             particle_factory=lambda emitter: FadeParticle(
                 filename_or_texture=texture,
                 change_xy=self._random_velocity_sphere(random.uniform(0.05, 0.5)),  # ULTRA tight
-                lifetime=random.uniform(2.5, 3.5),
+                lifetime=random.uniform(1.0, 1.5),
                 scale=random.uniform(2.0, 2.8),
                 start_alpha=255,
                 end_alpha=0,
@@ -362,7 +448,7 @@ class FireworkParticleSystem:
                                         tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=self._random_velocity_sphere(random.uniform(smin, smax)),
-                    lifetime=random.uniform(2.5, 3.5),
+                    lifetime=random.uniform(1.0, 1.5),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,
@@ -386,7 +472,7 @@ class FireworkParticleSystem:
             particle_factory=lambda emitter: FadeParticle(
                 filename_or_texture=texture,
                 change_xy=(random.uniform(-0.3, 0.3), random.uniform(0.3, 1.0)),
-                lifetime=random.uniform(5.0, 7.0),
+                lifetime=random.uniform(1.5, 2.0),
                 scale=random.uniform(1.3, 1.9),
                 start_alpha=255,
                 end_alpha=0,
@@ -422,7 +508,7 @@ class FireworkParticleSystem:
                                         sc_max=scale_max, tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=(random.uniform(-0.2, 0.2), random.uniform(vmin, vmax)),
-                    lifetime=random.uniform(2.5, 3.5),
+                    lifetime=random.uniform(1.0, 1.5),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,
@@ -457,7 +543,7 @@ class FireworkParticleSystem:
                                         tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=self._random_velocity_sphere(random.uniform(smin, smax)),
-                    lifetime=random.uniform(2.0, 3.0),
+                    lifetime=random.uniform(0.8, 1.2),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,
@@ -495,7 +581,7 @@ class FireworkParticleSystem:
                                         tex=layer_texture: FadeParticle(
                     filename_or_texture=tex,
                     change_xy=self._random_velocity_sphere(random.uniform(smin, smax)),
-                    lifetime=random.uniform(2.5, 3.5),
+                    lifetime=random.uniform(1.0, 1.5),
                     scale=random.uniform(sc_min, sc_max),
                     start_alpha=255,
                     end_alpha=0,

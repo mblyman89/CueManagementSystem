@@ -173,7 +173,7 @@ class MusicSelectionDialog(QDialog):
     def _preview_vr(self):
         """Start VR preview with optional music and selected mode"""
         # Get selected mode
-        mode = self.mode_combo.currentData() if hasattr(self, 'mode_combo') else "python"
+        mode = self.mode_combo.currentData() if hasattr(self, 'mode_combo') else "led_panel"
 
         # Emit signal with music and mode
         self.preview_vr_requested.emit(self.selected_music, mode)
@@ -181,7 +181,7 @@ class MusicSelectionDialog(QDialog):
 
     def _create_preview_mode_selector(self, parent_layout):
         """Create the preview mode selector group"""
-        group_box = QGroupBox("VR Preview Mode")
+        group_box = QGroupBox("Preview Mode")
         group_box.setStyleSheet("""
             QGroupBox {
                 font-weight: bold;
@@ -201,18 +201,13 @@ class MusicSelectionDialog(QDialog):
 
         # Mode selector
         mode_layout = QHBoxLayout()
-        mode_label = QLabel("Visualization Engine:")
+        mode_label = QLabel("Visualization Mode:")
         mode_label.setFont(QFont("Arial", 10, QFont.Bold))
         mode_layout.addWidget(mode_label)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItem("🐍 Python Visualizer (Quick, Built-in)", "python")
-
-        if self.ue5_available:
-            self.mode_combo.addItem("🎮 Unreal Engine 5 (Photorealistic)", "ue5")
-        else:
-            self.mode_combo.addItem("🎮 Unreal Engine 5 (Not Configured)", "ue5_disabled")
-            self.mode_combo.model().item(1).setEnabled(False)
+        self.mode_combo.addItem("📺 LED Panel Preview (Classic)", "led_panel")
+        self.mode_combo.addItem("🎆 Professional Firework Visualizer", "firework_visualizer")
 
         self.mode_combo.setMinimumWidth(300)
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
@@ -238,25 +233,23 @@ class MusicSelectionDialog(QDialog):
 
         mode = self.mode_combo.currentData()
 
-        if mode == "python":
+        if mode == "led_panel":
             description = (
-                "✓ Instant startup (no loading time)\n"
-                "✓ Built-in, always available\n"
-                "✓ Good quality particle effects\n"
-                "✓ Perfect for quick testing"
+                "✓ Preview on LED panel in main window\n"
+                "✓ Classic visualization mode\n"
+                "✓ No additional windows\n"
+                "✓ Quick and simple"
             )
-        elif mode == "ue5":
+        elif mode == "firework_visualizer":
             description = (
-                "✓ Photorealistic graphics\n"
-                "✓ Advanced particle systems\n"
-                "✓ Professional-quality audio\n"
-                "⚠ Requires 30-60 seconds to launch"
+                "✓ Professional-grade particle effects\n"
+                "✓ Realistic firework physics\n"
+                "✓ Full-screen visualization window\n"
+                "✓ 600-800 particles per burst\n"
+                "✓ Auto-closes when show ends"
             )
-        else:  # ue5_disabled
-            description = (
-                "UE5 is not configured.\n"
-                "Go to Tools → Preferences to set it up."
-            )
+        else:
+            description = "Select a preview mode"
 
         self.mode_description.setText(description)
 
