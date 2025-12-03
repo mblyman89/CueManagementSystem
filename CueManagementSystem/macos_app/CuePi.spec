@@ -21,10 +21,30 @@ datas = [
     (os.path.join(project_root, 'resources'), 'resources'),
     (os.path.join(project_root, 'config'), 'config'),
     (os.path.join(project_root, 'raspberry_pi'), 'raspberry_pi'),
+    # Firework visualizer data files (CRITICAL for VR preview)
+    (os.path.join(project_root, 'firework_visualizer'), 'firework_visualizer'),
     # New files for dynamic Spleeter path support
     (os.path.join(project_root, 'config_manager.py'), '.'),
     (os.path.join(project_root, 'views/dialogs/spleeter_setup_dialog.py'), 'views/dialogs'),
 ]
+
+# Add arcade data files (CRITICAL for VR preview)
+# Note: We manually add arcade resources to avoid VERSION file conflict
+try:
+    import arcade
+    arcade_path = os.path.dirname(arcade.__file__)
+    # Add arcade resources directory
+    arcade_resources = os.path.join(arcade_path, 'resources')
+    if os.path.exists(arcade_resources):
+        datas.append((arcade_resources, 'arcade/resources'))
+except:
+    pass
+
+# Add pyglet data files (CRITICAL for VR preview)
+try:
+    datas += collect_data_files('pyglet')
+except:
+    pass
 
 # Add librosa data files (audio processing models)
 try:
@@ -48,6 +68,30 @@ hiddenimports = [
     'PySide6.QtMultimediaWidgets',
     'PySide6.QtAsyncio',
     'PySide6.QtAsyncio.events',
+    
+    # Arcade and OpenGL (CRITICAL for VR preview)
+    'arcade',
+    'arcade.gl',
+    'arcade.gui',
+    'arcade.resources',
+    'pyglet',
+    'pyglet.gl',
+    'pyglet.window',
+    'pyglet.window.cocoa',
+    'OpenGL',
+    'OpenGL.GL',
+    'OpenGL.GLU',
+    
+    # Firework visualizer modules (CRITICAL for VR preview)
+    'firework_visualizer',
+    'firework_visualizer.enhanced_simple_game_view',
+    'firework_visualizer.enhanced_launch_system',
+    'firework_visualizer.enhanced_shell',
+    'firework_visualizer.firework_particles',
+    'firework_visualizer.firework_physics',
+    'firework_visualizer.simple_background_system',
+    'firework_visualizer.config',
+    'firework_visualizer.arcade_entry_point',
     
     # Audio processing
     'librosa',
@@ -117,6 +161,14 @@ hiddenimports = [
 ]
 
 # Collect all submodules for critical packages
+# Note: We don't collect all arcade submodules to avoid VERSION file conflict
+# The hidden imports list above already includes the necessary arcade modules
+
+try:
+    hiddenimports += collect_submodules('pyglet')
+except:
+    pass
+
 try:
     hiddenimports += collect_submodules('madmom')
 except:
@@ -204,5 +256,8 @@ app = BUNDLE(
         'LSMinimumSystemVersion': '10.15.0',
         'NSRequiresAquaSystemAppearance': 'False',
         'LSApplicationCategoryType': 'public.app-category.utilities',
+        'LSEnvironment': {
+            'PYTHONOPTIMIZE': '1',
+        },
     },
 )

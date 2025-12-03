@@ -1,6 +1,10 @@
 """
 Enhanced Simple Game View - Realistic fireworks with static background
 Integrates the new physics-based launch system with particle effects
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import arcade

@@ -10,6 +10,10 @@ Features:
 - Extreme particle density (500-1000 per burst)
 - Gradient textures
 - Perfect radial symmetry
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import arcade

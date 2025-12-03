@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
         self.ue5_manager = UE5Manager(self)
 
         # Initialize Firework Visualizer Bridge
-        from controllers.firework_visualizer_bridge import FireworkVisualizerBridge
+        from controllers.firework_visualizer_bridge_controller import FireworkVisualizerBridge
         self.firework_visualizer_bridge = FireworkVisualizerBridge(self)
 
         # Connect preview controller signals

@@ -1,446 +1,480 @@
-============================================================================
+# =============================================================================
 
-Firework Cue Management System - Comprehensive Requirements
+# Firework Cue Management System - Comprehensive Requirements
 
-============================================================================
+# =============================================================================
 
-This file contains all dependencies required to run the Cue Management System
+# This file contains all dependencies required to run the Cue Management System
 
 
 
-Python Version: 3.8 - 3.12 (3.10+ recommended for best compatibility)
+# Python Version: 3.8 - 3.12 (3.10+ recommended for best compatibility)
 
-Last Updated: 2025
+# Last Updated: 2025
 
-============================================================================
+# =============================================================================
 
-============================================================================
+# =============================================================================
 
-CORE GUI FRAMEWORK
+# CORE GUI FRAMEWORK
 
-============================================================================
+# =============================================================================
 
-PySide6 - Qt for Python, provides the entire GUI framework
+# PySide6 - Qt for Python, provides the entire GUI framework
 
-Used in: 46+ files including all dialogs, widgets, and main window
+# Used in: 46+ files including all dialogs, widgets, and main window
 
 PySide6>=6.5.0,<6.8.0
 
 
-============================================================================
+# =============================================================================
 
-AUDIO PROCESSING & ANALYSIS
+# AUDIO PROCESSING & ANALYSIS
 
-============================================================================
+# =============================================================================
 
-Librosa - Core audio analysis library for beat detection and feature extraction
+# Librosa - Core audio analysis library for beat detection and feature extraction
 
-Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
+# Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
 
 librosa>=0.10.1,<0.11.0
 
 
-NumPy - Fundamental package for numerical computing
+# NumPy - Fundamental package for numerical computing
 
-Used in: 6+ files for array operations, signal processing, and data manipulation
+# Used in: 6+ files for array operations, signal processing, and data manipulation
 
 numpy>=1.24.0,<2.0.0
 
 
-SciPy - Scientific computing library for signal processing and filtering
+# SciPy - Scientific computing library for signal processing and filtering
 
-Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
+# Used in: waveform_analyzer.py, enhanced_waveform_renderer.py, visual_validator.py
 
 scipy>=1.10.0,<1.12.0
 
 
-SoundFile - Library for reading and writing sound files
+# SoundFile - Library for reading and writing sound files
 
-Used in: waveform_analyzer.py for audio file I/O
+# Used in: waveform_analyzer.py for audio file I/O
 
 soundfile>=0.12.1
 
 
-AudioRead - Cross-library audio decoding for various formats
+# AudioRead - Cross-library audio decoding for various formats
 
-Used by librosa for loading audio files in multiple formats
+# Used by librosa for loading audio files in multiple formats
 
 audioread>=3.0.0
 
 
-Resampy - Efficient audio resampling
+# Resampy - Efficient audio resampling
 
-Required by librosa for sample rate conversion
+# Required by librosa for sample rate conversion
 
 resampy>=0.4.2
 
 
-============================================================================
+# =============================================================================
 
-ADVANCED BEAT DETECTION
+# ADVANCED BEAT DETECTION
 
-============================================================================
+# =============================================================================
 
-Madmom - State-of-the-art audio signal processing library for beat tracking
+# Madmom - State-of-the-art audio signal processing library for beat tracking
 
-Used in: waveform_analyzer.py for RNN-based beat detection and onset detection
+# Used in: waveform_analyzer.py for RNN-based beat detection and onset detection
 
-Note: Requires specific NumPy version compatibility
+# Note: Requires specific NumPy version compatibility
 
 madmom>=0.16.1
 
 
-============================================================================
+# =============================================================================
 
-MACHINE LEARNING
+# MACHINE LEARNING
 
-============================================================================
+# =============================================================================
 
-Scikit-learn - Machine learning library for clustering and classification
+# Scikit-learn - Machine learning library for clustering and classification
 
-Used in: waveform_analyzer.py for KMeans clustering, StandardScaler, IsolationForest
+# Used in: waveform_analyzer.py for KMeans clustering, StandardScaler, IsolationForest
 
 scikit-learn>=1.3.0
 
 
-============================================================================
+# =============================================================================
 
-DATA VISUALIZATION & PLOTTING
+# DATA VISUALIZATION & PLOTTING
 
-============================================================================
+# =============================================================================
 
-Matplotlib - Comprehensive plotting library
+# Matplotlib - Comprehensive plotting library
 
-Used in: waveform_analyzer.py for data visualization and analysis
+# Used in: waveform_analyzer.py for data visualization and analysis
 
 matplotlib>=3.7.0,<3.9.0
 
 
-Cycler - Composable style cycles for matplotlib
+# Cycler - Composable style cycles for matplotlib
 
 cycler>=0.11.0
 
 
-Kiwisolver - Fast implementation of Cassowary constraint solver
+# Kiwisolver - Fast implementation of Cassowary constraint solver
 
 kiwisolver>=1.4.0
 
 
-Pyparsing - Python parsing module
+# Pyparsing - Python parsing module
 
 pyparsing>=3.0.0
 
 
-Python-dateutil - Extensions to the standard datetime module
+# Python-dateutil - Extensions to the standard datetime module
 
 python-dateutil>=2.8.2
 
 
-============================================================================
+# =============================================================================
 
-IMAGE PROCESSING
+# IMAGE PROCESSING
 
-============================================================================
+# =============================================================================
 
-Pillow - Python Imaging Library for image manipulation
+# Pillow - Python Imaging Library for image manipulation
 
-Used in: create_icns.py, create_icns_alternative.py for icon creation
+# Used in: create_icns.py, create_icns_alternative.py for icon creation
 
 Pillow>=10.0.0
 
 
-============================================================================
+# =============================================================================
 
-NETWORKING & SSH
+# GAME/GRAPHICS RENDERING (ARCADE)
 
-============================================================================
+# =============================================================================
 
-Paramiko - SSHv2 protocol implementation for Python
+# Arcade - 2D game framework for Python built on top of pyglet
 
-Used in: 7+ files for SSH connections to Raspberry Pi
+# Planned use: Firework visualizer and future GPU-accelerated previews
 
-Includes: hardware_controller.py, system_mode_controller.py, terminal_session_manager.py
+arcade>=3.0.0,<4.0.0
+
+
+# Pyglet - Windowing and multimedia library used by Arcade
+
+# Explicitly pinned for compatibility; Arcade depends on pyglet
+
+pyglet>=2.0.10,<3.0.0
+
+
+# Pymunk - 2D physics engine (optional but commonly used with Arcade)
+
+# Needed if physics-based visuals or interactions are enabled
+
+pymunk>=6.5.0
+
+
+# PyTiled-Parser - TMX/TSX tile map support (optional, recommended)
+
+# Used when loading Tiled maps with Arcade
+
+pytiled-parser>=2.2.0
+
+
+# =============================================================================
+
+# NETWORKING & SSH
+
+# =============================================================================
+
+# Paramiko - SSHv2 protocol implementation for Python
+
+# Used in: 7+ files for SSH connections to Raspberry Pi
+
+# Includes: hardware_controller.py, system_mode_controller.py, terminal_session_manager.py
 
 paramiko>=3.3.0
 
 
-AsyncSSH - Asynchronous SSH client and server library
+# AsyncSSH - Asynchronous SSH client and server library
 
-Used for async SSH operations
+# Used for async SSH operations
 
 asyncssh>=2.13.0
 
 
-PyOpenSSL - Python wrapper for OpenSSL
+# PyOpenSSL - Python wrapper for OpenSSL
 
-Used for SSL/TLS support in network operations
+# Used for SSL/TLS support in network operations
 
 pyOpenSSL>=23.0.0
 
 
-Cryptography - Cryptographic recipes and primitives
+# Cryptography - Cryptographic recipes and primitives
 
-Required by paramiko and asyncssh
+# Required by paramiko and asyncssh
 
 cryptography>=41.0.0
 
 
-============================================================================
+# =============================================================================
 
-HARDWARE CONTROL (RASPBERRY PI)
+# HARDWARE CONTROL (RASPBERRY PI)
 
-============================================================================
+# =============================================================================
 
-RPi.GPIO - Raspberry Pi GPIO library
+# RPi.GPIO - Raspberry Pi GPIO library
 
-Used in: 8+ files for GPIO control on Raspberry Pi
+# Used in: 8+ files for GPIO control on Raspberry Pi
 
-Only installed on Raspberry Pi hardware (ARM architecture)
+# Only installed on Raspberry Pi hardware (ARM architecture)
 
 RPi.GPIO>=0.7.1; platform_machine=="armv7l" or platform_machine=="aarch64"
 
 
-lgpio - Modern GPIO library for Raspberry Pi
+# lgpio - Modern GPIO library for Raspberry Pi
 
-Used in: test_gpio_pins.py as alternative to RPi.GPIO
+# Used in: test_gpio_pins.py as alternative to RPi.GPIO
 
 lgpio>=0.2.0.0; platform_machine=="armv7l" or platform_machine=="aarch64"
 
 
-gpiozero - Simple interface to GPIO devices
+# gpiozero - Simple interface to GPIO devices
 
-Provides high-level interface for GPIO control
+# Provides high-level interface for GPIO control
 
 gpiozero>=2.0.0; platform_machine=="armv7l" or platform_machine=="aarch64"
 
 
-============================================================================
+# =============================================================================
 
-SYSTEM MONITORING & PERFORMANCE
+# SYSTEM MONITORING & PERFORMANCE
 
-============================================================================
+# =============================================================================
 
-psutil - Cross-platform process and system utilities
+# psutil - Cross-platform process and system utilities
 
-Used in: waveform_analyzer.py for performance monitoring
+# Used in: waveform_analyzer.py for performance monitoring
 
 psutil>=5.9.0
 
 
-============================================================================
+# =============================================================================
 
-DATA HANDLING & SERIALIZATION
+# DATA HANDLING & SERIALIZATION
 
-============================================================================
+# =============================================================================
 
-dataclasses-json - JSON serialization for dataclasses
+# dataclasses-json - JSON serialization for dataclasses
 
-Used for structured data handling
+# Used for structured data handling
 
 dataclasses-json>=0.6.0
 
 
-orjson - Fast, correct JSON library
+# orjson - Fast, correct JSON library
 
-Used for high-performance JSON operations
+# Used for high-performance JSON operations
 
 orjson>=3.9.0
 
 
-jsonschema - JSON Schema validation
+# jsonschema - JSON Schema validation
 
-Used for configuration validation
+# Used for configuration validation
 
 jsonschema>=4.17.0
 
 
-============================================================================
+# =============================================================================
 
-UTILITY LIBRARIES
+# UTILITY LIBRARIES
 
-============================================================================
+# =============================================================================
 
-tqdm - Progress bar library
+# tqdm - Progress bar library
 
-Used for showing progress during long operations
+# Used for showing progress during long operations
 
 tqdm>=4.65.0
 
 
-ConfigParser - Configuration file parser
+# ConfigParser - Configuration file parser
 
-Used for reading configuration files
+# Used for reading configuration files
 
 configparser>=5.3.0
 
 
-============================================================================
+# =============================================================================
 
-PLATFORM-SPECIFIC REQUIREMENTS
+# PLATFORM-SPECIFIC REQUIREMENTS
 
-============================================================================
+# =============================================================================
 
---- Windows-specific ---
+# --- Windows-specific ---
 
-PyAudio - Python bindings for PortAudio (audio I/O)
+# PyAudio - Python bindings for PortAudio (audio I/O)
 
-Required for audio playback on Windows
+# Required for audio playback on Windows
 
 pyaudio>=0.2.11; platform_system=="Windows"
 
 
---- macOS-specific ---
+# --- macOS-specific ---
 
-PyObjC - Python-Objective-C bridge
+# PyObjC - Python-Objective-C bridge
 
-Required for native macOS integration
+# Required for native macOS integration
 
 pyobjc-framework-Cocoa>=9.0; platform_system=="Darwin"
 pyobjc-framework-Quartz>=9.0; platform_system=="Darwin"
 
 
---- Linux-specific ---
+# --- Linux-specific ---
 
-Python-ALSA - ALSA bindings for Python
+# Python-ALSA - ALSA bindings for Python
 
-Required for audio on Linux systems
+# Required for audio on Linux systems
 
-Uncomment if needed:
+# Uncomment if needed:
 
 python-alsa>=1.2.7; platform_system=="Linux"
 
-============================================================================
+# =============================================================================
 
-DEVELOPMENT & BUILD TOOLS (Optional but recommended)
+# DEVELOPMENT & BUILD TOOLS (Optional but recommended)
 
-============================================================================
+# =============================================================================
 
-PyInstaller - Package Python applications into standalone executables
+# PyInstaller - Package Python applications into standalone executables
 
-Required for building macOS app bundle
+# Required for building macOS app bundle
 
-Install separately: pip install pyinstaller>=6.0.0
+# Install separately: pip install pyinstaller>=6.0.0
 
 pyinstaller>=6.0.0
 
-============================================================================
+# =============================================================================
 
-SPLEETER AUDIO SEPARATION (SEPARATE ENVIRONMENT)
+# SPLEETER AUDIO SEPARATION (SEPARATE ENVIRONMENT)
 
-============================================================================
+# =============================================================================
 
-Spleeter requires a separate Python 3.8 environment due to TensorFlow dependencies
+# Spleeter requires a separate Python 3.8 environment due to TensorFlow dependencies
 
 
 
-Installation instructions:
+# Installation instructions:
 
-1. Create separate environment:
+# 1. Create separate environment:
 
-conda create -n spleeter_env python=3.8
+# conda create -n spleeter_env python=3.8
 
-conda activate spleeter_env
+# conda activate spleeter_env
 
 
 
-2. Install Spleeter:
+# 2. Install Spleeter:
 
-For Intel/AMD (x86_64):
+# For Intel/AMD (x86_64):
 
-pip install spleeter
+# pip install spleeter
 
 
 
-For Apple Silicon (arm64):
+# For Apple Silicon (arm64):
 
-pip install tensorflow-macos tensorflow-metal spleeter
+# pip install tensorflow-macos tensorflow-metal spleeter
 
 
 
-3. Download pre-trained models:
+# 3. Download pre-trained models:
 
-spleeter separate -p spleeter:4stems -o output_folder dummy.wav
+# spleeter separate -p spleeter:4stems -o output_folder dummy.wav
 
-(Cancel after models download)
+# (Cancel after models download)
 
 
 
-4. Configure path in application:
+# 4. Configure path in application:
 
-Set CUE_SPLEETER_PATH environment variable or configure in app settings
+# Set CUE_SPLEETER_PATH environment variable or configure in app settings
 
 
 
-Dependencies in spleeter_env:
+# Dependencies in spleeter_env:
 
-- spleeter>=2.3.0
+# - spleeter>=2.3.0
 
-- tensorflow>=2.5.0,<2.6.0 (or tensorflow-macos for Apple Silicon)
+# - tensorflow>=2.5.0,<2.6.0 (or tensorflow-macos for Apple Silicon)
 
-- tensorflow-metal (Apple Silicon only)
+# - tensorflow-metal (Apple Silicon only)
 
-- ffmpeg-python>=0.2.0
+# - ffmpeg-python>=0.2.0
 
-- pandas>=1.0.0
+# - pandas>=1.0.0
 
-- norbert>=0.2.1
+# - norbert>=0.2.1
 
-- musdb>=0.4.0
+# - musdb>=0.4.0
 
-- museval>=0.4.0
+# - museval>=0.4.0
 
-============================================================================
+# =============================================================================
 
-============================================================================
+# =============================================================================
 
-ADDITIONAL NOTES
+# ADDITIONAL NOTES
 
-============================================================================
+# =============================================================================
 
 
 
-COMPATIBILITY NOTES:
+# COMPATIBILITY NOTES:
 
-- NumPy 2.0+ may cause issues with madmom - keep NumPy < 2.0
+# - NumPy 2.0+ may cause issues with madmom - keep NumPy < 2.0
 
-- Spleeter requires Python 3.8 and cannot be installed in the same environment
+# - Spleeter requires Python 3.8 and cannot be installed in the same environment
 
-- RPi.GPIO only works on Raspberry Pi hardware
+# - RPi.GPIO only works on Raspberry Pi hardware
 
-- Some audio backends may require system-level dependencies (ffmpeg, libsndfile)
+# - Some audio backends may require system-level dependencies (ffmpeg, libsndfile)
 
 
 
-SYSTEM DEPENDENCIES (install via system package manager):
+# SYSTEM DEPENDENCIES (install via system package manager):
 
-- ffmpeg (for audio format support)
+# - ffmpeg (for audio format support)
 
-- libsndfile (for soundfile library)
+# - libsndfile (for soundfile library)
 
-- portaudio (for pyaudio on Windows/Linux)
+# - portaudio (for pyaudio on Windows/Linux)
 
-- On macOS: Install via Homebrew: brew install ffmpeg libsndfile portaudio
+# - On macOS: Install via Homebrew: brew install ffmpeg libsndfile portaudio
 
-- On Ubuntu/Debian: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev
+# - On Ubuntu/Debian: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev
 
-- On Raspberry Pi: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev python3-rpi.gpio
+# - On Raspberry Pi: sudo apt-get install ffmpeg libsndfile1 portaudio19-dev python3-rpi.gpio
 
 
 
-RECOMMENDED PYTHON VERSION:
+# RECOMMENDED PYTHON VERSION:
 
-- Python 3.10 or 3.11 for main application
+# - Python 3.10 or 3.11 for main application
 
-- Python 3.8 for Spleeter environment
+# - Python 3.8 for Spleeter environment
 
 
 
-MEMORY REQUIREMENTS:
+# MEMORY REQUIREMENTS:
 
-- Minimum: 8GB RAM
+# - Minimum: 8GB RAM
 
-- Recommended: 16GB RAM for large audio files
+# - Recommended: 16GB RAM for large audio files
 
-- Raspberry Pi: 2GB+ recommended
+# - Raspberry Pi: 2GB+ recommended
 
-============================================================================
+# =============================================================================

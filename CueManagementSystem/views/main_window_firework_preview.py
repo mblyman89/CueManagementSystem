@@ -6,7 +6,7 @@ This file contains the firework visualizer preview methods for the main window.
 These methods are added to the MainWindow class to handle the Professional
 Firework Visualizer integration.
 
-Author: SuperNinja AI
+Author: Michael Lyman
 Version: 1.0.0
 License: MIT
 """

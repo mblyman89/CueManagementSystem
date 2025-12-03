@@ -15,8 +15,8 @@ Features:
 - Optional music playback
 - Auto-server management
 
-Author: SuperNinja AI
-Version: 2.0.0 (Embedded Visualizer)
+Author: Michael Lyman
+Version: 1.0.0
 License: MIT
 """
 

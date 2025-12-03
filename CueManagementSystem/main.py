@@ -60,6 +60,7 @@ if sys.platform.startswith('darwin'):
     # Use PyObjC to set the app name via Cocoa
     try:
         from Foundation import NSBundle
+
         bundle = NSBundle.mainBundle()
         if bundle:
             app_name = "CuePiShifter"
@@ -74,6 +75,7 @@ if sys.platform.startswith('darwin'):
 QCoreApplication.setApplicationName("CuePiShifter")
 QCoreApplication.setOrganizationName("CueManagementSystem")
 QCoreApplication.setOrganizationDomain("https://github.com/mblyman89/CueManagementSystem")
+
 
 class Application:
     def __init__(self):
@@ -136,4 +138,10 @@ def main():
 
 
 if __name__ == "__main__":
+    # CRITICAL: Add multiprocessing freeze_support for PyInstaller bundles
+    # This prevents child processes from re-executing the main script
+    import multiprocessing
+
+    multiprocessing.freeze_support()
+
     main()

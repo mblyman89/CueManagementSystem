@@ -1,6 +1,10 @@
 """
 Enhanced Firework Shell - Uses realistic physics for trajectory
 Integrates with the new FireworkPhysics system
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import random

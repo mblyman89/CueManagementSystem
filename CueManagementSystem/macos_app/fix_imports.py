@@ -2,6 +2,10 @@
 """
 Script to fix absolute imports in CuePi project for PyInstaller bundling.
 This converts 'from CueManagementSystem.X import Y' to relative imports.
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import os

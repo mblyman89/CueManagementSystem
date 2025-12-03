@@ -2,6 +2,10 @@
 Configuration Module - REALISTIC LAKE SCENE VERSION
 All settings and constants for the Firework Visualizer
 Updated to match the beautiful reference photo with dock and realistic mortar placement
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 # ============================================

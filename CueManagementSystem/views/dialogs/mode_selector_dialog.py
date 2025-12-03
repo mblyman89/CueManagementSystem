@@ -1000,7 +1000,7 @@ class ModeSelector(QDialog):
         pi_controls_layout.addStretch()
 
         # NEW: Connection Status Widget
-        from views.managers.connection_status_widget import ConnectionStatusBar
+        from views.managers.connection_status_widget_manager import ConnectionStatusBar
         self.connection_status_bar = ConnectionStatusBar(self)
 
         # Initialize with saved connection info if available

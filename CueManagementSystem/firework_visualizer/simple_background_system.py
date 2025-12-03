@@ -3,6 +3,10 @@ Simple Background System - Uses the reference image as the actual background.
 
 This is a much simpler approach that just loads the reference image and displays it,
 then renders fireworks on top. No complex sprite generation needed.
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import arcade

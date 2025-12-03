@@ -10,7 +10,7 @@ Advanced waveform rendering engine with multiple visualization modes:
 - Stereo channel separation and visualization
 - Dynamic range and envelope detection
 
-Author: Enhanced by NinjaTeach AI Team
+Author: Michael Lyman
 Version: 3.0.0 - Professional Edition
 """
 

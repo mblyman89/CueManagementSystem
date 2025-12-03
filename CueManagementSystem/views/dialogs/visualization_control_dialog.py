@@ -9,7 +9,7 @@ Dialog for controlling the UE5 visualization system, including:
 - Statistics display
 - Test firework launch
 
-Author: SuperNinja AI
+Author: Michael Lyman
 Version: 1.0.0
 License: MIT
 """

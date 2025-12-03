@@ -15,7 +15,7 @@ Features:
 - Auto-start/stop server
 - Single-click preview experience
 
-Author: SuperNinja AI
+Author: Michael Lyman
 Version: 2.0.0 (Embedded Visualizer)
 License: MIT
 """

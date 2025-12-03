@@ -1,6 +1,10 @@
 """
 Enhanced Launch System - Integrates physics-based shells with particle effects
 Manages the complete firework lifecycle from launch to burst
+
+Author: Michael Lyman
+Version: 1.0.0
+License: MIT
 """
 
 import random

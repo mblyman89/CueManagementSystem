@@ -6,8 +6,8 @@ Advanced control panel for professional waveform rendering modes and settings.
 Provides intuitive interface for switching between different visualization modes,
 color schemes, and rendering parameters.
 
-Author: Enhanced by NinjaTeach AI Team
-Version: 3.0.0 - Professional Edition
+Author: Michael Lyman
+Version: 1.0.0 - Professional Edition
 """
 
 from PySide6.QtWidgets import (
