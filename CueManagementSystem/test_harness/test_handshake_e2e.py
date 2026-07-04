@@ -136,15 +136,17 @@ def run():
             pass
         return
 
-    # --- Step 6: compute go_time and send over STDIN (the channel Pi reads) ---
-    laptop_go_time = time.time() + GO_LEAD_SECONDS
-    pi_go_time = laptop_go_time + offset
-    stdin.write(f"{pi_go_time}\n")
+    # --- Step 6: send a RELATIVE GO delay over STDIN (offset-immune) ---
+    go_delay = GO_LEAD_SECONDS
+    go_sent_at = time.time()
+    laptop_go_time = go_sent_at + go_delay
+    stdin.write(f"GO {go_delay}\n")
     stdin.flush()
-    print(f"    sent pi_go_time={pi_go_time:.4f} (lead={GO_LEAD_SECONDS}s)")
+    print(f"    sent relative GO delay={go_delay}s (offset was {offset*1000:.1f}ms, not used)")
 
     # --- Step 7: consume the Pi's started + success stream ---
     started = None
+    started_seen_at = None
     success = None
     deadline = time.time() + GO_LEAD_SECONDS + 15.0
     while time.time() < deadline:
@@ -161,6 +163,7 @@ def run():
         st = data.get("status")
         if st == "started":
             started = data
+            started_seen_at = time.time()
             print(f"    Pi started at pi_time={data.get('pi_time')}")
         elif st == "success":
             success = data
@@ -173,17 +176,14 @@ def run():
     check("Pi emitted 'started'", started is not None)
     check("Pi emitted 'success'", success is not None)
 
-    if started is not None:
-        # Verify the Pi actually waited for (didn't fire before) the go_time.
-        pi_started_at = float(started.get("pi_time", 0))
-        # started should be >= pi_go_time (within a small slack)
-        check("Pi honored go_time (started >= go)",
-              pi_started_at >= pi_go_time - 0.05,
-              f"(started={pi_started_at:.4f} go={pi_go_time:.4f})")
-        # And it should NOT have started absurdly late.
-        check("Pi started near go_time",
-              pi_started_at < pi_go_time + 0.5,
-              f"(delta={(pi_started_at - pi_go_time) * 1000:.1f} ms)")
+    if started is not None and started_seen_at is not None:
+        # With relative timing we verify the elapsed time on the laptop from
+        # sending GO to seeing 'started' is ~ go_delay. Robust even if the Pi's
+        # own wall clock is nonsense (that's the whole point).
+        elapsed = started_seen_at - go_sent_at
+        check("Pi waited ~go_delay before starting",
+              abs(elapsed - go_delay) < 0.5,
+              f"(elapsed={elapsed:.3f}s target={go_delay}s)")
 
     if success is not None:
         # The sample show has 3 cues; confirm the count.

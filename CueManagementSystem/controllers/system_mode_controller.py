@@ -1130,18 +1130,26 @@ class SystemMode(QObject):
                 # 5) Pi is ready. Choose a generous synchronized start time on the
                 #    LAPTOP clock, then translate it to the PI clock using the
                 #    measured offset before sending it.
-                laptop_go_time = time.time() + self.GO_LEAD_SECONDS
-                pi_go_time = laptop_go_time + self._clock_offset
+                #
+                # Why relative: the Pi on a direct Ethernet link has no internet
+                # and therefore no NTP, so its wall clock can be days off (we have
+                # observed ~39 days). An absolute-timestamp protocol depends on
+                # translating between wall clocks via a measured offset, which is
+                # fragile and pointless here. A relative countdown ("start N
+                # seconds from when you receive this") is immune to the Pi's wrong
+                # clock because the Pi counts down on its own MONOTONIC clock.
+                go_delay = self.GO_LEAD_SECONDS
+                laptop_go_time = time.time() + go_delay
 
-                print(f"SystemMode: laptop_go_time={laptop_go_time:.4f} "
-                      f"pi_go_time={pi_go_time:.4f} "
-                      f"lead={self.GO_LEAD_SECONDS}s offset={self._clock_offset * 1000:.1f}ms")
+                print(f"SystemMode: sending relative GO delay={go_delay:.3f}s "
+                      f"(laptop_go_time={laptop_go_time:.4f}; "
+                      f"measured offset {self._clock_offset * 1000:.1f}ms NOT used for timing)")
 
-                # 6) Send the GO timestamp (Pi clock) over STDIN — the channel the
-                #    Pi actually reads — and flush.
-                stdin.write(f"{pi_go_time}\n")
+                # 6) Send the relative GO delay over STDIN (channel the Pi reads)
+                #    and flush.
+                stdin.write(f"GO {go_delay}\n")
                 stdin.flush()
-                print("SystemMode: \u2713 GO signal sent (pi-clock)")
+                print("SystemMode: GO signal sent (relative delay)")
 
                 # 7) Publish the laptop-clock start time so the UI can start music
                 #    at the exact same instant the Pi begins firing.

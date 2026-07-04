@@ -370,36 +370,48 @@ def load_show_from_arg(arg):
         return json.load(f)
 
 
-def precise_wait_until(target_time):
-    """Wait until target_time (epoch seconds) with high precision.
+def precise_wait_delay(delay_seconds):
+    """Wait `delay_seconds` from NOW with high precision, using a monotonic clock.
 
-    Uses coarse sleep until 2ms before the target, then a busy spin-wait for
-    the final microseconds. If the target is already in the past, returns
-    immediately.
+    CRITICAL: This uses time.perf_counter() (a monotonic clock) rather than
+    time.time() (wall clock). The Pi on a direct Ethernet link has NO internet
+    and therefore NO NTP, so its wall clock can be wildly wrong (observed: off
+    by ~39 days). A relative countdown against a monotonic clock is completely
+    immune to that: it does not matter what date the Pi thinks it is.
+
+    Coarse sleep until 2ms before the target, then a busy spin-wait for the
+    final microseconds. If delay is <= 0, returns immediately.
     """
+    if delay_seconds <= 0:
+        return
+    target = time.perf_counter() + delay_seconds
     # Coarse sleep to within ~2ms
-    while time.time() < target_time - 0.002:
+    while time.perf_counter() < target - 0.002:
         time.sleep(0.001)
     # Fine spin-wait
-    while time.time() < target_time:
+    while time.perf_counter() < target:
         pass
 
 
-def run_show(show_data, start_timestamp=None):
-    """Optionally wait for start_timestamp (Pi-clock epoch seconds), then run."""
-    if start_timestamp is not None:
-        now = time.time()
-        print(f"[Sync] Target start (pi-clock): {start_timestamp}", file=sys.stderr)
-        print(f"[Sync] Pi current time: {now}", file=sys.stderr)
-        print(f"[Sync] Wait duration: {(start_timestamp - now) * 1000:.1f}ms", file=sys.stderr)
+def run_show(show_data, delay_seconds=None):
+    """Optionally wait `delay_seconds` (relative, monotonic), then run the show.
+
+    `delay_seconds` is a countdown from the moment this function is entered,
+    measured with a monotonic clock. This is offset-immune and does not depend
+    on the Pi's (possibly very wrong) wall clock.
+    """
+    if delay_seconds is not None:
+        print(f"[Sync] Relative start delay: {delay_seconds * 1000:.1f}ms", file=sys.stderr)
+        print(f"[Sync] Pi wall clock (informational): {time.time()}", file=sys.stderr)
         sys.stderr.flush()
 
-        precise_wait_until(start_timestamp)
-
-        actual_start = time.time()
-        sync_error = (actual_start - start_timestamp) * 1000
-        print(f"[Sync] Show started at (pi-clock): {actual_start}", file=sys.stderr)
-        print(f"[Sync] Local sync error: {sync_error:.3f}ms", file=sys.stderr)
+        t0 = time.perf_counter()
+        precise_wait_delay(delay_seconds)
+        actual_delay = time.perf_counter() - t0
+        sync_error = (actual_delay - delay_seconds) * 1000
+        print(f"[Sync] Waited {actual_delay * 1000:.1f}ms "
+              f"(target {delay_seconds * 1000:.1f}ms, error {sync_error:.3f}ms)",
+              file=sys.stderr)
         sys.stderr.flush()
 
     # Announce start to the laptop (flushed) so it can sync music precisely.
@@ -418,12 +430,17 @@ def main():
 
     2. Handshake:     execute_show.py <show_file> --handshake
        Loads the show, sets up GPIO, prints {"status":"ready"} (flushed), then
-       reads a GO timestamp (Pi-clock epoch seconds) from STDIN and waits for it
-       before running the show. This is the reliable, synchronized path.
+       reads a GO command from STDIN and waits before running the show. The GO
+       line is a RELATIVE delay in seconds (offset-immune), optionally prefixed
+       with "GO ":
+           "GO 3.0"   -> start 3.0 seconds from now (recommended)
+           "3.0"      -> same, bare number
+       A relative countdown avoids any dependence on the Pi's wall clock, which
+       has no NTP on a direct Ethernet link and can be days off.
 
     3. Legacy/direct: execute_show.py <show_file> [start_timestamp]
        Backward-compatible path. If start_timestamp (Pi-clock seconds) is given,
-       waits for it, then runs. Otherwise runs immediately.
+       converts it to a relative delay, waits, then runs. Otherwise runs now.
     """
     # Mode 1: clock probe
     if len(sys.argv) >= 2 and sys.argv[1] == '--now':
@@ -456,24 +473,42 @@ def main():
             # Tell the laptop we are fully initialized and ready to receive GO.
             emit({"status": "ready"})
 
-            # Block on stdin for the GO timestamp (Pi-clock epoch seconds).
+            # Block on stdin for the GO command. The GO line is a RELATIVE delay
+            # in seconds, optionally prefixed with "GO ". Relative timing is
+            # offset-immune (no dependence on the Pi's wall clock).
             go_line = sys.stdin.readline()
             if not go_line:
                 emit({"status": "error", "message": "No GO signal received on stdin"})
                 sys.exit(1)
 
             go_line = go_line.strip()
+            # Strip an optional "GO " prefix.
+            payload = go_line[3:].strip() if go_line.upper().startswith("GO ") else go_line
+
             try:
-                start_timestamp = float(go_line)
+                delay_seconds = float(payload)
             except ValueError:
-                emit({"status": "error", "message": f"Invalid GO timestamp: {go_line!r}"})
+                emit({"status": "error", "message": f"Invalid GO delay: {go_line!r}"})
                 sys.exit(1)
 
-            run_show(show_data, start_timestamp)
+            # Guard against a nonsensical delay (e.g. a stray absolute timestamp).
+            # A legitimate delay is small; clamp anything wild to a safe default.
+            if delay_seconds < 0 or delay_seconds > 60:
+                print(f"[Sync] WARNING: implausible delay {delay_seconds}s; "
+                      f"clamping to 3.0s", file=sys.stderr)
+                sys.stderr.flush()
+                delay_seconds = 3.0
+
+            run_show(show_data, delay_seconds)
             sys.exit(0)
 
-        # Legacy / direct path
-        run_show(show_data, legacy_timestamp)
+        # Legacy / direct path: convert an absolute wall-clock timestamp to a
+        # relative delay so we still use the monotonic countdown.
+        if legacy_timestamp is not None:
+            legacy_delay = legacy_timestamp - time.time()
+            run_show(show_data, legacy_delay if legacy_delay > 0 else 0)
+        else:
+            run_show(show_data, None)
         sys.exit(0)
 
     except Exception as e:
