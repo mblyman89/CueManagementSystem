@@ -863,8 +863,26 @@ class SystemMode(QObject):
         """Return a live SSH connection, reusing self.ssh_connection if healthy.
 
         Raises on failure. Uses a consistent 15s connect timeout.
+
+        ETHERNET HARDENING
+        ------------------
+        This system is used over a direct point-to-point Ethernet link. Two
+        transport-level settings make that link reliable for a long show:
+
+          * TCP keepalive (transport.set_keepalive): the SSH transport sends a
+            keepalive packet every few seconds. Without this, a long idle gap
+            between cues can let the OS/NIC silently drop an idle channel, and
+            you would only discover it when the next write fails mid-show. The
+            keepalive keeps the connection provably alive and lets us detect a
+            genuinely dead link fast.
+
+          * TCP_NODELAY (disable Nagle's algorithm): SSH already sets this, but
+            we assert it so the tiny READY/GO handshake messages are sent
+            immediately instead of being coalesced/delayed. On a low-latency
+            wired link this removes the last source of avoidable jitter.
         """
         import paramiko
+        import socket
 
         # Reuse existing connection if it's still alive
         if self.ssh_connection:
@@ -883,7 +901,32 @@ class SystemMode(QObject):
             username=self.connection_settings['username'],
             password=self.connection_settings.get('password', ''),
             timeout=15,
+            banner_timeout=15,
+            auth_timeout=15,
+            # We only use password auth on a direct link; skip agent/key probing
+            # so a stray SSH agent or key file can't slow or break the connect.
+            allow_agent=False,
+            look_for_keys=False,
         )
+
+        # --- Ethernet reliability hardening on the live transport ---
+        try:
+            transport = ssh.get_transport()
+            if transport is not None:
+                # Send a keepalive every 5s so an idle channel is never dropped
+                # during a quiet stretch of the show.
+                transport.set_keepalive(5)
+                # Assert TCP_NODELAY on the underlying socket for minimal latency.
+                sock = getattr(transport, "sock", None)
+                if sock is not None:
+                    try:
+                        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                    except Exception:
+                        pass  # already set by SSH in practice
+        except Exception as e:
+            # Hardening is best-effort; a failure here must not block the show.
+            self.logger.warning(f"SSH transport hardening skipped: {e}")
+
         self.ssh_connection = ssh
         return ssh
 
@@ -1011,32 +1054,56 @@ class SystemMode(QObject):
                 stdin, stdout, stderr = ssh.exec_command(command)
 
                 # 4) Wait for the Pi's READY signal (real-time, flushed by the Pi).
+                #
+                # We use a BLOCKING readline() with a per-read channel timeout
+                # instead of a recv_ready()/sleep poll. A poll loop has a subtle
+                # race on a fast (wired) link: data can arrive in the window
+                # between the recv_ready() check returning False and the next
+                # loop iteration, and a naive poll can stall or drop the line.
+                # A timed blocking readline() returns the READY line the instant
+                # it lands and can never miss buffered data.
                 print("SystemMode: Waiting for READY signal from Pi...")
                 channel = stdout.channel
+                # Wake up at least every 0.5s so we can re-check the overall
+                # timeout, print progress, and notice a dead channel.
+                channel.settimeout(0.5)
                 start_wait = time.time()
                 ready_received = False
 
                 while time.time() - start_wait < self.HANDSHAKE_READY_TIMEOUT:
-                    if channel.recv_ready():
-                        line = stdout.readline().strip()
-                        if not line:
-                            continue
-                        print(f"SystemMode: Received from Pi: {line}")
-                        try:
-                            data = json.loads(line)
-                        except Exception:
-                            continue  # non-JSON line, keep reading
-                        status = data.get('status')
-                        if status == 'ready':
-                            print("SystemMode: \u2713 Pi is READY")
-                            ready_received = True
+                    try:
+                        line = stdout.readline()
+                    except Exception:
+                        # settimeout raises socket.timeout on a quiet interval;
+                        # that is normal — loop again and re-check the deadline.
+                        line = ""
+
+                    # An empty string from readline() means EOF (process exited)
+                    # OR a timeout tick. Distinguish: if the channel reports the
+                    # process has exited and no more data is coming, stop.
+                    if line == "":
+                        if channel.exit_status_ready() and not channel.recv_ready():
+                            print("SystemMode: ERROR - Pi process exited before READY")
                             break
-                        if status == 'error':
-                            msg = data.get('message', 'unknown error')
-                            self.error_occurred.emit(f"Pi reported error before start: {msg}")
-                            return False
-                    else:
-                        time.sleep(0.005)  # 5ms poll, low latency
+                        continue  # timeout tick, keep waiting
+
+                    line = line.strip()
+                    if not line:
+                        continue
+                    print(f"SystemMode: Received from Pi: {line}")
+                    try:
+                        data = json.loads(line)
+                    except Exception:
+                        continue  # non-JSON line (stray log), keep reading
+                    status = data.get('status')
+                    if status == 'ready':
+                        print("SystemMode: \u2713 Pi is READY")
+                        ready_received = True
+                        break
+                    if status == 'error':
+                        msg = data.get('message', 'unknown error')
+                        self.error_occurred.emit(f"Pi reported error before start: {msg}")
+                        return False
 
                 if not ready_received:
                     print("SystemMode: ERROR - Pi did not signal READY in time")
@@ -1052,6 +1119,13 @@ class SystemMode(QObject):
                         "Pi did not signal ready in time. Ensure the updated "
                         "execute_show.py is uploaded to the Pi.")
                     return False
+
+                # Restore blocking behavior on the channel now that the READY
+                # wait is over (so any later read isn't affected by our timeout).
+                try:
+                    channel.settimeout(None)
+                except Exception:
+                    pass
 
                 # 5) Pi is ready. Choose a generous synchronized start time on the
                 #    LAPTOP clock, then translate it to the PI clock using the

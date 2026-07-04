@@ -34,6 +34,18 @@ MOCK = os.path.join(HERE, "mock_RPi")
 class FakeChannel:
     def __init__(self, proc):
         self._proc = proc
+        self._timeout = None
+
+    def settimeout(self, t):
+        # Mirror paramiko Channel.settimeout: applied to the underlying stdout
+        # pipe so a blocking readline() respects it.
+        self._timeout = t
+        try:
+            # Python file objects don't support socket-style timeouts directly,
+            # so the FakeStdout.readline honors self._timeout via select.
+            pass
+        except Exception:
+            pass
 
     def recv_ready(self):
         # Data is ready if the process has produced a line we can read without
@@ -45,6 +57,9 @@ class FakeChannel:
         r, _, _ = select.select([self._proc.stdout], [], [], 0)
         return bool(r)
 
+    def exit_status_ready(self):
+        return self._proc.poll() is not None
+
     def recv_exit_status(self):
         return self._proc.wait()
 
@@ -55,8 +70,16 @@ class FakeStdout:
         self.channel = FakeChannel(proc)
 
     def readline(self):
-        line = self._proc.stdout.readline()
-        return line
+        # Honor the channel timeout the way paramiko does: if no data is
+        # available within the timeout, return "" (an empty tick) rather than
+        # blocking forever. If timeout is None, block normally.
+        import select
+        timeout = self.channel._timeout
+        if timeout is not None and self._proc.stdout is not None:
+            r, _, _ = select.select([self._proc.stdout], [], [], timeout)
+            if not r:
+                return ""  # timeout tick
+        return self._proc.stdout.readline()
 
     def read(self):
         return self._proc.stdout.read()

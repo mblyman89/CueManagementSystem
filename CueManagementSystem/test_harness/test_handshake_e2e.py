@@ -97,28 +97,36 @@ def run():
     stdin, stdout, stderr = ssh.exec_command(command)
     channel = stdout.channel
 
-    # --- Step 5: wait for READY (verbatim poll loop) ---
+    # --- Step 5: wait for READY (HARDENED: blocking readline + channel timeout,
+    #     matching the real controller after Ethernet hardening) ---
+    channel.settimeout(0.5)
     start_wait = time.time()
     ready_received = False
     while time.time() - start_wait < HANDSHAKE_READY_TIMEOUT:
-        if channel.recv_ready():
-            line = stdout.readline().strip()
-            if not line:
-                continue
-            try:
-                data = json.loads(line)
-            except Exception:
-                continue
-            status = data.get("status")
-            if status == "ready":
-                ready_received = True
+        try:
+            line = stdout.readline()
+        except Exception:
+            line = ""
+        if line == "":
+            if channel.exit_status_ready() and not channel.recv_ready():
                 break
-            if status == "error":
-                check("Pi did not error before ready", False, f"({data.get('message')})")
-                return
-        else:
-            time.sleep(0.005)
-    check("Pi signaled READY within timeout", ready_received,
+            continue
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            data = json.loads(line)
+        except Exception:
+            continue
+        status = data.get("status")
+        if status == "ready":
+            ready_received = True
+            break
+        if status == "error":
+            check("Pi did not error before ready", False, f"({data.get('message')})")
+            return
+    channel.settimeout(None)
+    check("Pi signaled READY within timeout (hardened loop)", ready_received,
           f"(waited {time.time() - start_wait:.2f}s)")
     if not ready_received:
         try:
