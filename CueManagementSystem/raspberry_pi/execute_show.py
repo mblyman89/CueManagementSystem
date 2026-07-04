@@ -39,12 +39,47 @@ REGISTERS_PER_CHAIN = 25
 BITS_PER_REGISTER = 8
 
 def setup_gpio():
-    """Initialize GPIO pins"""
+    """Initialize GPIO pins.
+
+    CRITICAL: RPi.GPIO drives every pin LOW when it is configured with
+    GPIO.setup(pin, GPIO.OUT) unless an explicit `initial=` value is given.
+    For this hardware that default is WRONG for three control lines and would
+    silently undo the enable/arm state the laptop set moments before via
+    toggle_outputs.py / set_arm_state.py:
+
+      * SERIAL_CLEAR (SRCLR) is ACTIVE-HIGH: LOW clears/disables the shift
+        registers. Defaulting it LOW hides all shifted data -> nothing lights.
+      * ARM is ACTIVE-HIGH: LOW disarms the system -> firing is blocked.
+      * OUTPUT_ENABLE (OE) is ACTIVE-LOW: LOW enables outputs (LOW is correct,
+        but we set it explicitly so there is no ambiguity or glitch).
+
+    We therefore configure each control pin with an explicit initial value that
+    matches "outputs enabled + armed", so bringing up GPIO for the show never
+    disturbs the state the operator already set. Data/clock pins start LOW,
+    which is their correct idle state.
+    """
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
-    
-    for pin in OUTPUT_ENABLE_PINS + SERIAL_CLEAR_PINS + DATA_PINS + SCLK_PINS + RCLK_PINS + [ARM_PIN]:
-        GPIO.setup(pin, GPIO.OUT)
+
+    # Control lines: set them straight to their ENABLED/ARMED level so the
+    # transition through setup() never disables or disarms the hardware.
+    for pin in OUTPUT_ENABLE_PINS:              # active-LOW -> LOW == enabled
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+    for pin in SERIAL_CLEAR_PINS:               # active-HIGH -> HIGH == registers active
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
+    GPIO.setup(ARM_PIN, GPIO.OUT, initial=GPIO.HIGH)   # active-HIGH -> HIGH == armed
+
+    # Data / clock lines idle LOW.
+    for pin in DATA_PINS + SCLK_PINS + RCLK_PINS:
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+
+    # Belt-and-suspenders: some RPi.GPIO builds ignore `initial=` if the pin was
+    # already configured in this process; re-assert the enabled/armed state.
+    for pin in OUTPUT_ENABLE_PINS:
+        GPIO.output(pin, GPIO.LOW)
+    for pin in SERIAL_CLEAR_PINS:
+        GPIO.output(pin, GPIO.HIGH)
+    GPIO.output(ARM_PIN, GPIO.HIGH)
 
 def get_chain_for_output(output_num):
     """Determine which chain an output belongs to (0-4)"""
