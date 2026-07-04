@@ -347,53 +347,139 @@ def execute_show(show_data):
         }
     }
 
+def emit(obj):
+    """Print a JSON object to stdout and flush immediately.
+
+    CRITICAL: When this script runs under SSH exec_command, stdout is a pipe,
+    not a terminal, so Python uses block buffering. Without an explicit flush,
+    short messages (like the READY signal) get trapped in the buffer and never
+    reach the laptop. Every message the laptop needs in real time MUST be
+    flushed.
+    """
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def load_show_from_arg(arg):
+    """Load show data from a JSON string or a file path."""
+    if arg.startswith('{'):
+        return json.loads(arg)
+    import os
+    file_path = os.path.expanduser(arg)
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+
+def precise_wait_until(target_time):
+    """Wait until target_time (epoch seconds) with high precision.
+
+    Uses coarse sleep until 2ms before the target, then a busy spin-wait for
+    the final microseconds. If the target is already in the past, returns
+    immediately.
+    """
+    # Coarse sleep to within ~2ms
+    while time.time() < target_time - 0.002:
+        time.sleep(0.001)
+    # Fine spin-wait
+    while time.time() < target_time:
+        pass
+
+
+def run_show(show_data, start_timestamp=None):
+    """Optionally wait for start_timestamp (Pi-clock epoch seconds), then run."""
+    if start_timestamp is not None:
+        now = time.time()
+        print(f"[Sync] Target start (pi-clock): {start_timestamp}", file=sys.stderr)
+        print(f"[Sync] Pi current time: {now}", file=sys.stderr)
+        print(f"[Sync] Wait duration: {(start_timestamp - now) * 1000:.1f}ms", file=sys.stderr)
+        sys.stderr.flush()
+
+        precise_wait_until(start_timestamp)
+
+        actual_start = time.time()
+        sync_error = (actual_start - start_timestamp) * 1000
+        print(f"[Sync] Show started at (pi-clock): {actual_start}", file=sys.stderr)
+        print(f"[Sync] Local sync error: {sync_error:.3f}ms", file=sys.stderr)
+        sys.stderr.flush()
+
+    # Announce start to the laptop (flushed) so it can sync music precisely.
+    emit({"status": "started", "pi_time": time.time()})
+
+    result = execute_show(show_data)
+    emit(result)
+
+
 def main():
+    """Entry point supporting three modes:
+
+    1. Clock probe:   execute_show.py --now
+       Prints the Pi's current epoch time as JSON and exits. Used by the laptop
+       to measure the clock offset between the two machines.
+
+    2. Handshake:     execute_show.py <show_file> --handshake
+       Loads the show, sets up GPIO, prints {"status":"ready"} (flushed), then
+       reads a GO timestamp (Pi-clock epoch seconds) from STDIN and waits for it
+       before running the show. This is the reliable, synchronized path.
+
+    3. Legacy/direct: execute_show.py <show_file> [start_timestamp]
+       Backward-compatible path. If start_timestamp (Pi-clock seconds) is given,
+       waits for it, then runs. Otherwise runs immediately.
+    """
+    # Mode 1: clock probe
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        emit({"status": "time", "pi_time": time.time()})
+        sys.exit(0)
+
     if len(sys.argv) < 2:
-        print(json.dumps({"status": "error", "message": "Usage: execute_show.py '<show_file_path>' [start_timestamp]"}))
+        emit({"status": "error", "message": "Usage: execute_show.py <show_file> [--handshake | start_timestamp]"})
         sys.exit(1)
-    
+
     try:
         arg = sys.argv[1]
-        start_timestamp = float(sys.argv[2]) if len(sys.argv) > 2 else None
-        
-        # Check if argument is a file path or JSON string
-        if arg.startswith('{'):
-            # Direct JSON string
-            show_data = json.loads(arg)
-        else:
-            # File path - read JSON from file
-            import os
-            file_path = os.path.expanduser(arg)
-            with open(file_path, 'r') as f:
-                show_data = json.load(f)
-        
-        # If start timestamp provided, wait until that exact time
-        if start_timestamp:
-            print(f"[Sync] Waiting for start timestamp: {start_timestamp}", file=sys.stderr)
-            print(f"[Sync] Current time: {time.time()}", file=sys.stderr)
-            print(f"[Sync] Wait duration: {(start_timestamp - time.time()) * 1000:.1f}ms", file=sys.stderr)
-            
-            # Sleep until close to start time (leave 1ms buffer)
-            while time.time() < start_timestamp - 0.001:
-                time.sleep(0.001)  # Sleep 1ms at a time
-            
-            # Spin-wait for final precision
-            while time.time() < start_timestamp:
-                pass  # Busy-wait for exact moment
-            
-            actual_start = time.time()
-            sync_error = (actual_start - start_timestamp) * 1000  # Error in milliseconds
-            print(f"[Sync] Show started at: {actual_start}", file=sys.stderr)
-            print(f"[Sync] Sync error: {sync_error:.3f}ms", file=sys.stderr)
-        
+        handshake = '--handshake' in sys.argv[2:]
+
+        # Parse a legacy positional timestamp only if it is not the handshake flag.
+        legacy_timestamp = None
+        if not handshake and len(sys.argv) > 2:
+            try:
+                legacy_timestamp = float(sys.argv[2])
+            except ValueError:
+                legacy_timestamp = None
+
+        # Load the show BEFORE signaling ready so we fail fast on bad data.
+        show_data = load_show_from_arg(arg)
+
+        # Set up GPIO BEFORE signaling ready so the Pi is truly prepared.
         setup_gpio()
-        result = execute_show(show_data)
-        print(json.dumps(result))
+
+        if handshake:
+            # Tell the laptop we are fully initialized and ready to receive GO.
+            emit({"status": "ready"})
+
+            # Block on stdin for the GO timestamp (Pi-clock epoch seconds).
+            go_line = sys.stdin.readline()
+            if not go_line:
+                emit({"status": "error", "message": "No GO signal received on stdin"})
+                sys.exit(1)
+
+            go_line = go_line.strip()
+            try:
+                start_timestamp = float(go_line)
+            except ValueError:
+                emit({"status": "error", "message": f"Invalid GO timestamp: {go_line!r}"})
+                sys.exit(1)
+
+            run_show(show_data, start_timestamp)
+            sys.exit(0)
+
+        # Legacy / direct path
+        run_show(show_data, legacy_timestamp)
         sys.exit(0)
-        
+
     except Exception as e:
-        print(json.dumps({"status": "error", "message": str(e)}))
+        emit({"status": "error", "message": str(e)})
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

@@ -41,6 +41,21 @@ class SystemMode(QObject):
     message_received = Signal(str, str)  # topic, message
     error_occurred = Signal(str)  # error_message
     hardware_status_updated = Signal(dict)  # status_data
+    show_go_time_ready = Signal(float)  # laptop-clock epoch seconds when the show starts
+
+    # ------------------------------------------------------------------
+    # Show synchronization tuning constants
+    # ------------------------------------------------------------------
+    # Max time to wait for the Pi to signal READY after launch.  We succeed the
+    # instant READY arrives, so a generous value here only affects the failure
+    # timeout, never the happy path.
+    HANDSHAKE_READY_TIMEOUT = 20.0  # seconds
+    # How far in the future (laptop clock) to schedule the synchronized start.
+    # Must comfortably exceed SSH round-trip + Pi process launch time.  3s is
+    # safe over both Ethernet and WiFi adhoc.
+    GO_LEAD_SECONDS = 3.0
+    # Number of clock-offset probes to take; the median is used.
+    OFFSET_PROBES = 7
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,6 +72,10 @@ class SystemMode(QObject):
             "known_hosts": None
         }
         self.ssh_connection = None
+        # Cached clock offset (pi_time - laptop_time) measured before a show.
+        self._clock_offset = 0.0
+        # The laptop-clock epoch time the most recent show is scheduled to start.
+        self.last_go_time = None
         self.hardware_controller = HardwareController(self)
 
         # Create shift register configuration for large-scale system (1000 outputs)
@@ -840,6 +859,74 @@ class SystemMode(QObject):
             self.error_occurred.emit(f"Cue execution failed: {e}")
             return False
 
+    def _get_or_create_ssh(self):
+        """Return a live SSH connection, reusing self.ssh_connection if healthy.
+
+        Raises on failure. Uses a consistent 15s connect timeout.
+        """
+        import paramiko
+
+        # Reuse existing connection if it's still alive
+        if self.ssh_connection:
+            try:
+                transport = self.ssh_connection.get_transport()
+                if transport and transport.is_active():
+                    return self.ssh_connection
+            except Exception:
+                pass
+
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(
+            hostname=self.connection_settings['host'],
+            port=self.connection_settings.get('port', 22),
+            username=self.connection_settings['username'],
+            password=self.connection_settings.get('password', ''),
+            timeout=15,
+        )
+        self.ssh_connection = ssh
+        return ssh
+
+    def measure_clock_offset(self, ssh) -> float:
+        """Measure the clock offset between the laptop and the Pi.
+
+        Uses an NTP-style probe against `execute_show.py --now`.  For each probe
+        we record t1 (before), read the Pi's reported time, and t2 (after).
+        Assuming a symmetric round trip, the best estimate of the Pi's clock at
+        the midpoint is:  offset = pi_time - (t1 + t2) / 2
+
+        Returns the median offset (pi_time - laptop_time) in seconds.  A positive
+        value means the Pi's clock is ahead of the laptop's.
+        """
+        offsets = []
+        for _ in range(self.OFFSET_PROBES):
+            try:
+                t1 = time.time()
+                stdin, stdout, stderr = ssh.exec_command("python3 ~/execute_show.py --now", timeout=5)
+                line = stdout.readline().strip()
+                t2 = time.time()
+                data = json.loads(line)
+                pi_time = float(data.get("pi_time"))
+                offset = pi_time - (t1 + t2) / 2.0
+                offsets.append(offset)
+            except Exception as e:
+                self.logger.warning(f"Clock offset probe failed: {e}")
+                continue
+
+        if not offsets:
+            self.logger.warning("Clock offset could not be measured; assuming 0.0")
+            return 0.0
+
+        offsets.sort()
+        median = offsets[len(offsets) // 2]
+        self.logger.info(
+            f"Clock offset measured: {median * 1000:.1f} ms "
+            f"(pi is {'ahead of' if median >= 0 else 'behind'} laptop) "
+            f"from {len(offsets)} probes"
+        )
+        print(f"SystemMode: Clock offset measured: {median * 1000:.1f} ms")
+        return median
+
     async def handle_execute_show_button(self, show_cues: List[Dict[str, Any]], start_timestamp: float = None) -> bool:
         """
         Handle Execute Show button click
@@ -863,161 +950,141 @@ class SystemMode(QObject):
             status_message = f"Starting show execution with {len(show_cues)} cues"
             self.message_received.emit("show_status", status_message)
 
-            # Load and execute the show in the local show execution manager
-            if self.show_execution_manager.load_show(show_cues):
+            # Load the show into the local manager (used for progress/UI tracking
+            # and for simulation mode).  In HARDWARE mode the Pi runs the show, so
+            # we must NOT also run the local timed sequence — doing so races the Pi
+            # and corrupts timing.
+            if not self.show_execution_manager.load_show(show_cues):
+                self.error_occurred.emit("Failed to load show for execution")
+                return False
+
+            # ----------------------------------------------------------------
+            # SIMULATION MODE: run locally and return.
+            # ----------------------------------------------------------------
+            if not self.is_hardware_mode():
                 success = await self.show_execution_manager.execute_show()
-
-                # If in hardware mode, send SSH command to Pi
-                if self.is_hardware_mode():
-                    import paramiko
-
-                    # Try to reuse existing SSH connection if available
-                    ssh = None
-                    if self.ssh_connection:
-                        try:
-                            # Test if connection is still alive
-                            transport = self.ssh_connection.get_transport()
-                            if transport and transport.is_active():
-                                print("SystemMode: Reusing existing SSH connection for show execution")
-                                ssh = self.ssh_connection
-                            else:
-                                print("SystemMode: Existing SSH connection is dead, creating new one")
-                        except:
-                            print("SystemMode: Error checking SSH connection, creating new one")
-                    else:
-                        print("SystemMode: No existing SSH connection, creating new one")
-
-                    # Create fresh connection if needed
-                    if ssh is None:
-                        ssh = paramiko.SSHClient()
-                        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-
-                        try:
-                            # Connect using stored settings
-                            print(f"SystemMode: Connecting to {self.connection_settings['host']}...")
-                            ssh.connect(
-                                hostname=self.connection_settings['host'],
-                                port=self.connection_settings.get('port', 22),
-                                username=self.connection_settings['username'],
-                                password=self.connection_settings.get('password', ''),
-                                timeout=10
-                            )
-                            print("SystemMode: SSH connection established")
-                        except Exception as conn_error:
-                            print(f"SystemMode: Failed to establish SSH connection: {conn_error}")
-                            self.error_occurred.emit(f"SSH connection failed: {str(conn_error)}")
-                            return False
-
-                    try:
-
-                        # Use the pre-uploaded show file from checklist
-                        # This avoids re-uploading during the critical synchronization window
-                        temp_file = "/tmp/show_data.json"
-                        print(f"SystemMode: Using pre-uploaded show file: {temp_file}")
-                        # Verify file exists on Pi
-                        stdin, stdout, stderr = ssh.exec_command(f"test -f {temp_file} && echo 'exists'")
-                        file_check = stdout.read().decode().strip()
-
-                        if file_check == 'exists':
-                            print("SystemMode: Pre-uploaded show file verified on Pi")
-
-                            # TWO-WAY HANDSHAKE: Start script and wait for READY signal
-                            # This ensures Pi is fully initialized before we calculate final timestamp
-                            print("SystemMode: Starting two-way handshake synchronization...")
-
-                            # Build command WITHOUT background (&) so we can communicate via stdin/stdout
-                            if start_timestamp:
-                                command = f"python3 ~/execute_show.py {temp_file} {start_timestamp} 2>/tmp/show_execution.log"
-                            else:
-                                command = f"python3 ~/execute_show.py {temp_file} 2>/tmp/show_execution.log"
-
-                            print(f"SystemMode: Executing command: {command}")
-
-                            # Execute command (NOT in background - we need stdin/stdout)
-                            stdin, stdout, stderr = ssh.exec_command(command)
-
-                            # WAIT FOR READY SIGNAL from Pi
-                            print("SystemMode: Waiting for READY signal from Pi...")
-                            import select
-                            ready_timeout = 10  # 10 seconds max wait for ready
-                            start_wait = time.time()
-
-                            ready_received = False
-                            while time.time() - start_wait < ready_timeout:
-                                # Check if stdout has data
-                                if stdout.channel.recv_ready():
-                                    line = stdout.readline().strip()
-                                    print(f"SystemMode: Received from Pi: {line}")
-
-                                    try:
-                                        import json
-                                        data = json.loads(line)
-                                        if data.get('status') == 'ready':
-                                            print("SystemMode: ✓ Pi is READY!")
-                                            ready_received = True
-                                            break
-                                    except:
-                                        pass  # Not JSON, keep waiting
-
-                                time.sleep(0.01)  # Small delay to avoid busy-wait
-
-                            if not ready_received:
-                                print("SystemMode: ERROR - Pi did not signal READY in time!")
-                                self.error_occurred.emit("Pi did not signal ready in time")
-                                success = False
-                            else:
-                                # Pi is ready! Calculate final timestamp with short buffer
-                                final_timestamp = time.time() + 0.5  # 500ms buffer (Pi is already ready!)
-                                print(f"SystemMode: Sending GO signal with timestamp: {final_timestamp}")
-                                print(f"SystemMode: Current time: {time.time()}")
-                                print(f"SystemMode: Delay: 500ms (Pi is already initialized)")
-
-                                # SEND GO SIGNAL to Pi
-                                stdin.write(f"{final_timestamp}\n")
-                                stdin.flush()
-                                print("SystemMode: ✓ GO signal sent!")
-
-                                self.logger.info(f"Show execution started via two-way handshake")
-                                print("SystemMode: Show execution started on Pi with perfect sync")
-                                success = True
-                        else:
-                            self.logger.error(f"Pre-uploaded show file not found on Pi: {temp_file}")
-                            print(f"SystemMode: ERROR - Show file not found: {temp_file}")
-                            print("SystemMode: Please upload show data using the Pre-Show Checklist first!")
-                            self.error_occurred.emit(
-                                f"Show file not found. Upload show data first using Pre-Show Checklist.")
-                            success = False
-
-                        # Only close if we created a new connection (not reusing existing)
-                        if ssh != self.ssh_connection:
-                            ssh.close()
-                            print("SystemMode: SSH connection closed")
-                        else:
-                            print("SystemMode: Keeping SSH connection alive for future use")
-
-                    except Exception as ssh_e:
-                        self.logger.error(f"SSH show execution error: {ssh_e}")
-                        print(f"SystemMode: SSH connection error: {ssh_e}")
-                        self.error_occurred.emit(f"SSH show execution error: {str(ssh_e)}")
-                        success = False
-
-                        # Try to close connection if it was opened (only if not reusing)
-                        try:
-                            if ssh and ssh != self.ssh_connection:
-                                ssh.close()
-                        except:
-                            pass
-
                 if success:
-                    self.logger.info("Show execution started successfully")
                     self.message_received.emit("show_status", "Show execution started successfully")
                 else:
-                    self.logger.error("Failed to start show execution")
                     self.error_occurred.emit("Failed to start show execution")
-
                 return success
-            else:
-                self.error_occurred.emit("Failed to load show for execution")
+
+            # ----------------------------------------------------------------
+            # HARDWARE MODE: synchronized handshake with the Pi.
+            # ----------------------------------------------------------------
+            try:
+                ssh = self._get_or_create_ssh()
+                print("SystemMode: SSH connection ready for show execution")
+            except Exception as conn_error:
+                print(f"SystemMode: Failed to establish SSH connection: {conn_error}")
+                self.error_occurred.emit(f"SSH connection failed: {str(conn_error)}")
+                return False
+
+            try:
+                # 1) Verify the pre-uploaded show file exists on the Pi.
+                temp_file = "/tmp/show_data.json"
+                print(f"SystemMode: Verifying pre-uploaded show file: {temp_file}")
+                _in, _out, _err = ssh.exec_command(f"test -f {temp_file} && echo 'exists'")
+                file_check = _out.read().decode().strip()
+
+                if file_check != 'exists':
+                    self.logger.error(f"Pre-uploaded show file not found on Pi: {temp_file}")
+                    self.error_occurred.emit(
+                        "Show file not found on Pi. Upload show data first using the Pre-Show Checklist.")
+                    return False
+
+                print("SystemMode: Show file verified on Pi")
+
+                # 2) Measure the laptop<->Pi clock offset ONCE, before launch.
+                #    This corrects for the fact that the two machines' wall clocks
+                #    are not synchronized (no NTP over a direct link).
+                self._clock_offset = self.measure_clock_offset(ssh)
+
+                # 3) Launch the show script in HANDSHAKE mode.  We tee stderr to a
+                #    log on the Pi so sync diagnostics survive, and DO NOT hide it
+                #    from ourselves (we can read /tmp/show_execution.log on error).
+                command = (
+                    f"python3 ~/execute_show.py {temp_file} --handshake "
+                    f"2>/tmp/show_execution.log"
+                )
+                print(f"SystemMode: Launching: {command}")
+                stdin, stdout, stderr = ssh.exec_command(command)
+
+                # 4) Wait for the Pi's READY signal (real-time, flushed by the Pi).
+                print("SystemMode: Waiting for READY signal from Pi...")
+                channel = stdout.channel
+                start_wait = time.time()
+                ready_received = False
+
+                while time.time() - start_wait < self.HANDSHAKE_READY_TIMEOUT:
+                    if channel.recv_ready():
+                        line = stdout.readline().strip()
+                        if not line:
+                            continue
+                        print(f"SystemMode: Received from Pi: {line}")
+                        try:
+                            data = json.loads(line)
+                        except Exception:
+                            continue  # non-JSON line, keep reading
+                        status = data.get('status')
+                        if status == 'ready':
+                            print("SystemMode: \u2713 Pi is READY")
+                            ready_received = True
+                            break
+                        if status == 'error':
+                            msg = data.get('message', 'unknown error')
+                            self.error_occurred.emit(f"Pi reported error before start: {msg}")
+                            return False
+                    else:
+                        time.sleep(0.005)  # 5ms poll, low latency
+
+                if not ready_received:
+                    print("SystemMode: ERROR - Pi did not signal READY in time")
+                    # Pull the Pi's stderr log tail to help diagnose.
+                    try:
+                        _i, _o, _e = ssh.exec_command("tail -n 20 /tmp/show_execution.log")
+                        tail = _o.read().decode().strip()
+                        if tail:
+                            print(f"SystemMode: Pi log tail:\n{tail}")
+                    except Exception:
+                        pass
+                    self.error_occurred.emit(
+                        "Pi did not signal ready in time. Ensure the updated "
+                        "execute_show.py is uploaded to the Pi.")
+                    return False
+
+                # 5) Pi is ready. Choose a generous synchronized start time on the
+                #    LAPTOP clock, then translate it to the PI clock using the
+                #    measured offset before sending it.
+                laptop_go_time = time.time() + self.GO_LEAD_SECONDS
+                pi_go_time = laptop_go_time + self._clock_offset
+
+                print(f"SystemMode: laptop_go_time={laptop_go_time:.4f} "
+                      f"pi_go_time={pi_go_time:.4f} "
+                      f"lead={self.GO_LEAD_SECONDS}s offset={self._clock_offset * 1000:.1f}ms")
+
+                # 6) Send the GO timestamp (Pi clock) over STDIN — the channel the
+                #    Pi actually reads — and flush.
+                stdin.write(f"{pi_go_time}\n")
+                stdin.flush()
+                print("SystemMode: \u2713 GO signal sent (pi-clock)")
+
+                # 7) Publish the laptop-clock start time so the UI can start music
+                #    at the exact same instant the Pi begins firing.
+                self.last_go_time = laptop_go_time
+                self.show_go_time_ready.emit(laptop_go_time)
+
+                self.logger.info("Show execution started via synchronized handshake")
+                self.message_received.emit("show_status", "Show execution started successfully")
+
+                # Keep the SSH connection alive; the Pi streams started/success on
+                # stdout and ABORT relies on the live connection.
+                return True
+
+            except Exception as ssh_e:
+                self.logger.error(f"SSH show execution error: {ssh_e}")
+                print(f"SystemMode: SSH show execution error: {ssh_e}")
+                self.error_occurred.emit(f"SSH show execution error: {str(ssh_e)}")
                 return False
 
         except Exception as e:
