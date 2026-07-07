@@ -700,8 +700,6 @@ class MainWindow(QMainWindow):
                                            or None if no music was selected
         """
         try:
-            import time
-
             # Get all cues from the table
             show_cues = self.get_all_cues_for_execution()
 
@@ -709,19 +707,20 @@ class MainWindow(QMainWindow):
                 print("No cues available for execution")
                 return
 
-            # Calculate start timestamp (500ms from now for synchronization)
-            start_timestamp = time.time() + 0.5
-            print(f"\n=== SYNCHRONIZED START ===")
-            print(f"Current time: {time.time()}")
-            print(f"Start timestamp: {start_timestamp}")
-            print(f"Delay: 500ms")
+            # Stash the selected music so we can start it the instant the
+            # controller reports the synchronized start time (see
+            # _on_show_go_time_ready).  The controller now owns all timing: it
+            # performs the handshake with the Pi, measures the clock offset, and
+            # chooses a generous, reliable start instant.  We do NOT compute our
+            # own timestamp here and we do NOT block the UI thread.
+            self._pending_music_info = music_file_info
 
             # Prepare status message
             if music_file_info:
                 music_name = f"{music_file_info['name']}{music_file_info['extension']}"
-                status_message = f"Hardware execution started with music: {music_name}"
+                status_message = f"Hardware execution starting with music: {music_name}"
             else:
-                status_message = "Hardware execution started (no music)"
+                status_message = "Hardware execution starting (no music)"
 
             # Enable ABORT button for hardware execution (stored as "STOP" key)
             if hasattr(self, 'button_bar'):
@@ -736,34 +735,59 @@ class MainWindow(QMainWindow):
                     self.button_bar.buttons["EXECUTE CUE"].set_active(False)
                     print("EXECUTE CUE button disabled during show execution")
 
-            # Execute show on Pi via SSH with timestamp
-            print(f"Sending show to Pi with start timestamp: {start_timestamp}")
-            asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues, start_timestamp))
+            # Kick off the synchronized show on the Pi.  No timestamp is passed:
+            # the controller computes the start time after the READY handshake
+            # and emits show_go_time_ready with the laptop-clock start instant.
+            print("Sending show to Pi (controller will handshake and schedule start)...")
+            asyncio.create_task(self.system_mode.handle_execute_show_button(show_cues))
 
-            # Wait until start timestamp (synchronized start)
-            print(f"Waiting for start timestamp...")
-            while time.time() < start_timestamp - 0.001:
-                time.sleep(0.001)  # Sleep until close to start time
-
-            # Spin-wait for final precision
-            while time.time() < start_timestamp:
-                pass  # Busy-wait for exact moment
-
-            actual_start = time.time()
-            sync_error = (actual_start - start_timestamp) * 1000
-            print(f"Music starting at: {actual_start}")
-            print(f"Sync error: {sync_error:.3f}ms")
-
-            # Start music NOW (synchronized with Pi)
-            if music_file_info:
-                self.music_manager.preview_music(music_file_info['path'], volume=0.7)
-                print(f"Playing music: {music_file_info['path']}")
-
-            # Update status bar
+            # Update status bar; music starts in _on_show_go_time_ready.
             self.statusBar().showMessage(status_message)
 
         except Exception as e:
             print(f"Error starting hardware execution with music: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _on_show_go_time_ready(self, laptop_go_time):
+        """Start music at the exact laptop-clock instant the Pi begins firing.
+
+        The controller emits show_go_time_ready(laptop_go_time) after the Pi has
+        acknowledged READY and been given its GO timestamp.  laptop_go_time is a
+        few seconds in the future (GO_LEAD_SECONDS).  We schedule the music to
+        begin at that instant WITHOUT blocking the Qt event loop by using a
+        one-shot QTimer for the coarse wait and a very short spin only for the
+        final sub-millisecond alignment.
+        """
+        try:
+            import time
+            from PySide6.QtCore import QTimer
+
+            music_info = getattr(self, '_pending_music_info', None)
+
+            def _fire_music():
+                # Final short spin-wait for precise alignment (<= a few ms).
+                now = time.time()
+                if now < laptop_go_time:
+                    while time.time() < laptop_go_time:
+                        pass
+                actual = time.time()
+                sync_error = (actual - laptop_go_time) * 1000.0
+                print(f"Music/show start at: {actual} (sync error {sync_error:.3f}ms)")
+                if music_info:
+                    try:
+                        self.music_manager.preview_music(music_info['path'], volume=0.7)
+                        print(f"Playing music: {music_info['path']}")
+                    except Exception as me:
+                        print(f"Error starting music: {me}")
+
+            # Schedule the coarse wait using QTimer so the UI stays responsive.
+            delay_ms = max(0, int((laptop_go_time - time.time()) * 1000) - 5)
+            QTimer.singleShot(delay_ms, _fire_music)
+            print(f"Scheduled music start in ~{delay_ms}ms (non-blocking)")
+
+        except Exception as e:
+            print(f"Error scheduling synchronized music start: {e}")
             import traceback
             traceback.print_exc()
 
@@ -863,6 +887,10 @@ class MainWindow(QMainWindow):
                 self.system_mode.error_occurred.connect(self.handle_ssh_error)
             if hasattr(self.system_mode, 'hardware_status_updated'):
                 self.system_mode.hardware_status_updated.connect(self.update_hardware_status)
+            # When the controller has completed the handshake and knows the exact
+            # (laptop-clock) start instant, start the music precisely then.
+            if hasattr(self.system_mode, 'show_go_time_ready'):
+                self.system_mode.show_go_time_ready.connect(self._on_show_go_time_ready)
 
             # Connect show execution manager signals (use correct signal names)
             if hasattr(self, 'show_execution_manager') and self.show_execution_manager:

@@ -39,12 +39,47 @@ REGISTERS_PER_CHAIN = 25
 BITS_PER_REGISTER = 8
 
 def setup_gpio():
-    """Initialize GPIO pins"""
+    """Initialize GPIO pins.
+
+    CRITICAL: RPi.GPIO drives every pin LOW when it is configured with
+    GPIO.setup(pin, GPIO.OUT) unless an explicit `initial=` value is given.
+    For this hardware that default is WRONG for three control lines and would
+    silently undo the enable/arm state the laptop set moments before via
+    toggle_outputs.py / set_arm_state.py:
+
+      * SERIAL_CLEAR (SRCLR) is ACTIVE-HIGH: LOW clears/disables the shift
+        registers. Defaulting it LOW hides all shifted data -> nothing lights.
+      * ARM is ACTIVE-HIGH: LOW disarms the system -> firing is blocked.
+      * OUTPUT_ENABLE (OE) is ACTIVE-LOW: LOW enables outputs (LOW is correct,
+        but we set it explicitly so there is no ambiguity or glitch).
+
+    We therefore configure each control pin with an explicit initial value that
+    matches "outputs enabled + armed", so bringing up GPIO for the show never
+    disturbs the state the operator already set. Data/clock pins start LOW,
+    which is their correct idle state.
+    """
     GPIO.setmode(GPIO.BCM)
     GPIO.setwarnings(False)
-    
-    for pin in OUTPUT_ENABLE_PINS + SERIAL_CLEAR_PINS + DATA_PINS + SCLK_PINS + RCLK_PINS + [ARM_PIN]:
-        GPIO.setup(pin, GPIO.OUT)
+
+    # Control lines: set them straight to their ENABLED/ARMED level so the
+    # transition through setup() never disables or disarms the hardware.
+    for pin in OUTPUT_ENABLE_PINS:              # active-LOW -> LOW == enabled
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+    for pin in SERIAL_CLEAR_PINS:               # active-HIGH -> HIGH == registers active
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)
+    GPIO.setup(ARM_PIN, GPIO.OUT, initial=GPIO.HIGH)   # active-HIGH -> HIGH == armed
+
+    # Data / clock lines idle LOW.
+    for pin in DATA_PINS + SCLK_PINS + RCLK_PINS:
+        GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+
+    # Belt-and-suspenders: some RPi.GPIO builds ignore `initial=` if the pin was
+    # already configured in this process; re-assert the enabled/armed state.
+    for pin in OUTPUT_ENABLE_PINS:
+        GPIO.output(pin, GPIO.LOW)
+    for pin in SERIAL_CLEAR_PINS:
+        GPIO.output(pin, GPIO.HIGH)
+    GPIO.output(ARM_PIN, GPIO.HIGH)
 
 def get_chain_for_output(output_num):
     """Determine which chain an output belongs to (0-4)"""
@@ -347,53 +382,174 @@ def execute_show(show_data):
         }
     }
 
+def emit(obj):
+    """Print a JSON object to stdout and flush immediately.
+
+    CRITICAL: When this script runs under SSH exec_command, stdout is a pipe,
+    not a terminal, so Python uses block buffering. Without an explicit flush,
+    short messages (like the READY signal) get trapped in the buffer and never
+    reach the laptop. Every message the laptop needs in real time MUST be
+    flushed.
+    """
+    sys.stdout.write(json.dumps(obj) + "\n")
+    sys.stdout.flush()
+
+
+def load_show_from_arg(arg):
+    """Load show data from a JSON string or a file path."""
+    if arg.startswith('{'):
+        return json.loads(arg)
+    import os
+    file_path = os.path.expanduser(arg)
+    with open(file_path, 'r') as f:
+        return json.load(f)
+
+
+def precise_wait_delay(delay_seconds):
+    """Wait `delay_seconds` from NOW with high precision, using a monotonic clock.
+
+    CRITICAL: This uses time.perf_counter() (a monotonic clock) rather than
+    time.time() (wall clock). The Pi on a direct Ethernet link has NO internet
+    and therefore NO NTP, so its wall clock can be wildly wrong (observed: off
+    by ~39 days). A relative countdown against a monotonic clock is completely
+    immune to that: it does not matter what date the Pi thinks it is.
+
+    Coarse sleep until 2ms before the target, then a busy spin-wait for the
+    final microseconds. If delay is <= 0, returns immediately.
+    """
+    if delay_seconds <= 0:
+        return
+    target = time.perf_counter() + delay_seconds
+    # Coarse sleep to within ~2ms
+    while time.perf_counter() < target - 0.002:
+        time.sleep(0.001)
+    # Fine spin-wait
+    while time.perf_counter() < target:
+        pass
+
+
+def run_show(show_data, delay_seconds=None):
+    """Optionally wait `delay_seconds` (relative, monotonic), then run the show.
+
+    `delay_seconds` is a countdown from the moment this function is entered,
+    measured with a monotonic clock. This is offset-immune and does not depend
+    on the Pi's (possibly very wrong) wall clock.
+    """
+    if delay_seconds is not None:
+        print(f"[Sync] Relative start delay: {delay_seconds * 1000:.1f}ms", file=sys.stderr)
+        print(f"[Sync] Pi wall clock (informational): {time.time()}", file=sys.stderr)
+        sys.stderr.flush()
+
+        t0 = time.perf_counter()
+        precise_wait_delay(delay_seconds)
+        actual_delay = time.perf_counter() - t0
+        sync_error = (actual_delay - delay_seconds) * 1000
+        print(f"[Sync] Waited {actual_delay * 1000:.1f}ms "
+              f"(target {delay_seconds * 1000:.1f}ms, error {sync_error:.3f}ms)",
+              file=sys.stderr)
+        sys.stderr.flush()
+
+    # Announce start to the laptop (flushed) so it can sync music precisely.
+    emit({"status": "started", "pi_time": time.time()})
+
+    result = execute_show(show_data)
+    emit(result)
+
+
 def main():
+    """Entry point supporting three modes:
+
+    1. Clock probe:   execute_show.py --now
+       Prints the Pi's current epoch time as JSON and exits. Used by the laptop
+       to measure the clock offset between the two machines.
+
+    2. Handshake:     execute_show.py <show_file> --handshake
+       Loads the show, sets up GPIO, prints {"status":"ready"} (flushed), then
+       reads a GO command from STDIN and waits before running the show. The GO
+       line is a RELATIVE delay in seconds (offset-immune), optionally prefixed
+       with "GO ":
+           "GO 3.0"   -> start 3.0 seconds from now (recommended)
+           "3.0"      -> same, bare number
+       A relative countdown avoids any dependence on the Pi's wall clock, which
+       has no NTP on a direct Ethernet link and can be days off.
+
+    3. Legacy/direct: execute_show.py <show_file> [start_timestamp]
+       Backward-compatible path. If start_timestamp (Pi-clock seconds) is given,
+       converts it to a relative delay, waits, then runs. Otherwise runs now.
+    """
+    # Mode 1: clock probe
+    if len(sys.argv) >= 2 and sys.argv[1] == '--now':
+        emit({"status": "time", "pi_time": time.time()})
+        sys.exit(0)
+
     if len(sys.argv) < 2:
-        print(json.dumps({"status": "error", "message": "Usage: execute_show.py '<show_file_path>' [start_timestamp]"}))
+        emit({"status": "error", "message": "Usage: execute_show.py <show_file> [--handshake | start_timestamp]"})
         sys.exit(1)
-    
+
     try:
         arg = sys.argv[1]
-        start_timestamp = float(sys.argv[2]) if len(sys.argv) > 2 else None
-        
-        # Check if argument is a file path or JSON string
-        if arg.startswith('{'):
-            # Direct JSON string
-            show_data = json.loads(arg)
-        else:
-            # File path - read JSON from file
-            import os
-            file_path = os.path.expanduser(arg)
-            with open(file_path, 'r') as f:
-                show_data = json.load(f)
-        
-        # If start timestamp provided, wait until that exact time
-        if start_timestamp:
-            print(f"[Sync] Waiting for start timestamp: {start_timestamp}", file=sys.stderr)
-            print(f"[Sync] Current time: {time.time()}", file=sys.stderr)
-            print(f"[Sync] Wait duration: {(start_timestamp - time.time()) * 1000:.1f}ms", file=sys.stderr)
-            
-            # Sleep until close to start time (leave 1ms buffer)
-            while time.time() < start_timestamp - 0.001:
-                time.sleep(0.001)  # Sleep 1ms at a time
-            
-            # Spin-wait for final precision
-            while time.time() < start_timestamp:
-                pass  # Busy-wait for exact moment
-            
-            actual_start = time.time()
-            sync_error = (actual_start - start_timestamp) * 1000  # Error in milliseconds
-            print(f"[Sync] Show started at: {actual_start}", file=sys.stderr)
-            print(f"[Sync] Sync error: {sync_error:.3f}ms", file=sys.stderr)
-        
+        handshake = '--handshake' in sys.argv[2:]
+
+        # Parse a legacy positional timestamp only if it is not the handshake flag.
+        legacy_timestamp = None
+        if not handshake and len(sys.argv) > 2:
+            try:
+                legacy_timestamp = float(sys.argv[2])
+            except ValueError:
+                legacy_timestamp = None
+
+        # Load the show BEFORE signaling ready so we fail fast on bad data.
+        show_data = load_show_from_arg(arg)
+
+        # Set up GPIO BEFORE signaling ready so the Pi is truly prepared.
         setup_gpio()
-        result = execute_show(show_data)
-        print(json.dumps(result))
+
+        if handshake:
+            # Tell the laptop we are fully initialized and ready to receive GO.
+            emit({"status": "ready"})
+
+            # Block on stdin for the GO command. The GO line is a RELATIVE delay
+            # in seconds, optionally prefixed with "GO ". Relative timing is
+            # offset-immune (no dependence on the Pi's wall clock).
+            go_line = sys.stdin.readline()
+            if not go_line:
+                emit({"status": "error", "message": "No GO signal received on stdin"})
+                sys.exit(1)
+
+            go_line = go_line.strip()
+            # Strip an optional "GO " prefix.
+            payload = go_line[3:].strip() if go_line.upper().startswith("GO ") else go_line
+
+            try:
+                delay_seconds = float(payload)
+            except ValueError:
+                emit({"status": "error", "message": f"Invalid GO delay: {go_line!r}"})
+                sys.exit(1)
+
+            # Guard against a nonsensical delay (e.g. a stray absolute timestamp).
+            # A legitimate delay is small; clamp anything wild to a safe default.
+            if delay_seconds < 0 or delay_seconds > 60:
+                print(f"[Sync] WARNING: implausible delay {delay_seconds}s; "
+                      f"clamping to 3.0s", file=sys.stderr)
+                sys.stderr.flush()
+                delay_seconds = 3.0
+
+            run_show(show_data, delay_seconds)
+            sys.exit(0)
+
+        # Legacy / direct path: convert an absolute wall-clock timestamp to a
+        # relative delay so we still use the monotonic countdown.
+        if legacy_timestamp is not None:
+            legacy_delay = legacy_timestamp - time.time()
+            run_show(show_data, legacy_delay if legacy_delay > 0 else 0)
+        else:
+            run_show(show_data, None)
         sys.exit(0)
-        
+
     except Exception as e:
-        print(json.dumps({"status": "error", "message": str(e)}))
+        emit({"status": "error", "message": str(e)})
         sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

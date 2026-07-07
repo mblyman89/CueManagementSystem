@@ -1,0 +1,7 @@
+{
+  "cues": [
+    {"type": "SINGLE SHOT", "time": 0, "output": 1, "duration": 100},
+    {"type": "SINGLE SHOT", "time": 200, "output": 2, "duration": 100},
+    {"type": "DOUBLE SHOT", "time": 400, "output1": 3, "output2": 205, "duration": 100}
+  ]
+}
